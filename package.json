@@ -1,0 +1,15 @@
+{
+  "name": "balance",
+  "version": "1.0.0",
+  "description": "Financial records balance, etc",
+  "keywords": [
+    "Fin"
+  ],
+  "license": "MIT",
+  "author": "Jayro Gómez",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

@@ -27,8 +27,8 @@ NODE_ENV=prod  npm start         # boot against the prod DB/config
 
 ## Architecture
 
-- **Layered per module:** `route → controller → service → repository`. Controllers handle HTTP + boundary validation + money conversion; services hold business logic and invariants; repositories own SQL.
-- **Money:** stored as integer **cents**; API speaks **decimals**. Convert at the controller boundary (`src/lib/money.js`).
+- **Entity pattern:** each resource lives in `src/entities/<name>/` as a generated **model** (`db/model.js` via `modelGenerator`) + **routes** (`http/routes.js` via `restGenerator`), with validation/invariants in **hooks** (`http/hooks.js`). Generic CRUD generators live in `src/utils/`. Custom routes register before `restGenerator`. Import models cross-entity directly (never via the entity `index.js`) to avoid circular deps.
+- **Money:** stored as integer **cents**; API speaks **decimals**. The model layer converts decimal↔cents via `moneyFields` (`src/lib/money.js`).
 - **Auth-ready:** `middleware/auth.js` injects `req.userId = 1` for now. Every table has `user_id`; swap this middleware for real auth in Phase 2 without touching queries.
 - **Soft deletion:** every table has a nullable `deleted_at`. All reads filter `deleted_at IS NULL`; deletes set the timestamp. Soft-deleted resources return `404`.
 
@@ -50,9 +50,11 @@ Allocate = set an income's `vault_id`; withdraw = set it back to `NULL`. Each lo
 | `src/config/db.js` | `better-sqlite3` connection (path from config). |
 | `src/db/schema.sql` | Full DDL (all tables, indexes, constraints). |
 | `src/db/migrate.js` / `seed.js` | Apply schema / seed user + categories. |
-| `src/middleware/` | `auth.js`, `errorHandler.js`, `validate.js`. |
+| `src/middleware/` | `auth.js`, `errorHandler.js`. |
 | `src/lib/money.js` | Decimal ↔ cents conversion. |
-| `src/modules/{transactions,vaults,categories,balance}/` | Feature modules (route/controller/service/repository). |
+| `src/constants/hooks.js` | Lifecycle hook type constants. |
+| `src/utils/{modelGenerator,restGenerator}/` | Generic CRUD model + routes/handlers. |
+| `src/entities/{transactions,vaults,categories,balance}/` | Feature entities (constants, `db/`, `http/`). |
 | `src/app.js` / `src/server.js` | Express wiring / boot sequence. |
 
 ## Workflow

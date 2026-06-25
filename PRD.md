@@ -110,7 +110,7 @@ Amounts in requests/responses are **decimals**. Soft-deleted resources return `4
 
 ## 8. Architecture (summary)
 
-Layered per module: **route → controller → service → repository**. Money decimal↔cents conversion lives in a shared helper used at the controller boundary. DB connection and environment config are isolated in `src/config/`. See `ARCHITECTURE.md` for the full directory map and diagrams.
+Entity pattern: each resource lives in `src/entities/<name>/` as a generated **model** (`db/model.js` via `modelGenerator`) and **routes** (`http/routes.js` via `restGenerator`), with validation and invariants in **hooks** (`http/hooks.js`). Generic CRUD generators live in `src/utils/`. Money decimal↔cents conversion is handled by the model layer (`moneyFields`). DB connection and environment config are isolated in `src/config/`. See `ARCHITECTURE.md` for the full directory map and diagrams.
 
 ## 9. Phases
 

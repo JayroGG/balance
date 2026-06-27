@@ -1,6 +1,6 @@
 # fly.toml — balance API
-# App name must be globally unique across Fly; change "balance-api" if it's taken.
-app = "balance-api"
+# App name must match the Fly app (globally unique).
+app = "balance-4pi"
 primary_region = "mia"  # change to your nearest: gru (São Paulo), scl, bog, qro, mia ...
 
 [build]

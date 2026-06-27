@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+data
+.env
+.env.*
+.git
+.gitignore
+.claude
+docs
+*.md
+.DS_Store
+Dockerfile
+.dockerignore
+fly.toml

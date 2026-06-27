@@ -1,0 +1,31 @@
+# fly.toml — balance API
+# App name must be globally unique across Fly; change "balance-api" if it's taken.
+app = "balance-api"
+primary_region = "mia"  # change to your nearest: gru (São Paulo), scl, bog, qro, mia ...
+
+[build]
+
+[env]
+  NODE_ENV = "prod"
+  PORT = "3000"
+  DB_PATH = "/data/balance.prod.db"
+  CURRENCY = "USD"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # Scale to zero when idle, wake on the next request — ~no cost while unused.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+# Persistent volume so the SQLite file survives restarts/redeploys/scale-to-zero.
+# Create it once (same region as primary_region):
+#   fly volumes create balance_data --region mia --size 1
+[mounts]
+  source = "balance_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

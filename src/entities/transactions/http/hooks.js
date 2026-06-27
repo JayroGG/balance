@@ -1,7 +1,8 @@
 'use strict';
-const { BEFORE_CREATE, BEFORE_UPDATE } = require('../../../constants/hooks');
-// Import vaults model directly to avoid circular index deps
-const { VaultModel } = require('../../vaults/db/model');
+const { BEFORE_CREATE, BEFORE_UPDATE, BEFORE_DESTROY } = require('../../../constants/hooks');
+const { toCents } = require('../../../lib/money');
+// Import balance queries directly to avoid circular index deps
+const { availableCents } = require('../../balance/db/queries');
 
 const VALID_TYPES = ['income', 'expense'];
 
@@ -11,30 +12,41 @@ const assertType = (type) => {
   }
 };
 
-const assertVaultAllowed = (userId, type, vaultId) => {
-  if (type === 'expense' && vaultId) {
-    const e = new Error('Expense transactions cannot be assigned to a vault'); e.status = 400; throw e;
-  }
-  if (vaultId) {
-    const vault = VaultModel.findById(userId, Number(vaultId));
-    if (!vault) { const e = new Error('Vault not found'); e.status = 404; throw e; }
+// How a transaction moves net worth: income adds, expense subtracts.
+const contribution = (type, amountCents) => (type === 'income' ? amountCents : -amountCents);
+
+// Reject any write whose effect on net worth would push available below zero
+// (vaulted money is protected). deltaCents = change to net worth from this write.
+const assertSpendable = (userId, deltaCents) => {
+  if (deltaCents >= 0) return; // increases or neutral — always safe
+  if (availableCents(userId) + deltaCents < 0) {
+    const e = new Error('Insufficient available balance: the amount exceeds spendable money (funds are allocated to vaults)');
+    e.status = 400; throw e;
   }
 };
 
-const transactionHooks = ({ type, body, previous, req }) => {
+const transactionHooks = ({ type, body, previous, record, req }) => {
   switch (type) {
-    case BEFORE_CREATE:
+    case BEFORE_CREATE: {
       if (!body.type)   { const e = new Error('Missing required field: type');   e.status = 400; throw e; }
       if (!body.amount) { const e = new Error('Missing required field: amount'); e.status = 400; throw e; }
       assertType(body.type);
-      assertVaultAllowed(req.userId, body.type, body.vault_id);
+      assertSpendable(req.userId, contribution(body.type, toCents(body.amount)));
       return;
+    }
 
     case BEFORE_UPDATE: {
-      const resolvedType    = body.type     !== undefined ? body.type     : previous.type;
-      const resolvedVaultId = body.vault_id !== undefined ? body.vault_id : previous.vault_id;
+      const resolvedType = body.type !== undefined ? body.type : previous.type;
       assertType(resolvedType);
-      assertVaultAllowed(req.userId, resolvedType, resolvedVaultId);
+      const oldContribution = contribution(previous.type, toCents(previous.amount));
+      const newAmountCents  = body.amount !== undefined ? toCents(body.amount) : toCents(previous.amount);
+      const newContribution = contribution(resolvedType, newAmountCents);
+      assertSpendable(req.userId, newContribution - oldContribution);
+      return;
+    }
+
+    case BEFORE_DESTROY: {
+      assertSpendable(req.userId, -contribution(record.type, toCents(record.amount)));
       return;
     }
 

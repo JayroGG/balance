@@ -35,7 +35,6 @@ CREATE TABLE IF NOT EXISTS transactions (
   type        TEXT    NOT NULL CHECK (type IN ('income', 'expense')),
   amount      INTEGER NOT NULL CHECK (amount > 0),
   category_id INTEGER REFERENCES categories(id),
-  vault_id    INTEGER REFERENCES vaults(id),
   description TEXT,
   occurred_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
   created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -43,16 +42,16 @@ CREATE TABLE IF NOT EXISTS transactions (
   deleted_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_user     ON transactions(user_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_vault    ON transactions(vault_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
 
+-- Append-only ledger of vault movements; source of truth for vault balances.
+-- A vault's balance = SUM(allocate) - SUM(withdraw). Movements are not tied to a transaction.
 CREATE TABLE IF NOT EXISTS vault_history (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id        INTEGER NOT NULL REFERENCES users(id),
-  vault_id       INTEGER NOT NULL REFERENCES vaults(id),
-  transaction_id INTEGER NOT NULL REFERENCES transactions(id),
-  action         TEXT    NOT NULL CHECK (action IN ('allocate', 'withdraw')),
-  amount         INTEGER NOT NULL,
-  created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  vault_id   INTEGER NOT NULL REFERENCES vaults(id),
+  action     TEXT    NOT NULL CHECK (action IN ('allocate', 'withdraw')),
+  amount     INTEGER NOT NULL CHECK (amount > 0),
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_vault_history_vault ON vault_history(vault_id);

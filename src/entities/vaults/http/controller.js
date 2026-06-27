@@ -1,14 +1,36 @@
 'use strict';
 const { VaultModel } = require('../db/model');
 const history = require('../db/history');
-// Import transactions model directly to avoid circular index deps
-const { TransactionModel } = require('../../transactions/db/model');
+const { toCents, toDecimal } = require('../../../lib/money');
+// Import balance queries directly to avoid circular index deps
+const { availableCents, vaultBalanceCents } = require('../../balance/db/queries');
+
+// Vault record + its derived balance (the shape the mobile client consumes).
+const vaultView = (userId, vault) => ({
+  id:      vault.id,
+  name:    vault.name,
+  balance: toDecimal(vaultBalanceCents(userId, vault.id)),
+  target:  vault.target_amount !== null && vault.target_amount !== undefined ? vault.target_amount : null,
+});
+
+// Resolve { amount } from the body into positive cents, or throw 400.
+const parseAmount = (raw) => {
+  if (raw === undefined || raw === null) { const e = new Error('Missing required field: amount'); e.status = 400; throw e; }
+  const cents = toCents(raw);
+  if (!Number.isInteger(cents) || cents <= 0) { const e = new Error('amount must be a positive number'); e.status = 400; throw e; }
+  return cents;
+};
+
+const requireVault = (userId, vaultId) => {
+  const vault = VaultModel.findById(userId, vaultId);
+  if (!vault) { const e = new Error('Vault not found'); e.status = 404; throw e; }
+  return vault;
+};
 
 const getHistory = (req, res, next) => {
   try {
     const vaultId = Number(req.params.id);
-    const vault = VaultModel.findById(req.userId, vaultId);
-    if (!vault) { const e = new Error('Vault not found'); e.status = 404; throw e; }
+    requireVault(req.userId, vaultId);
     res.json(history.findByVault(req.userId, vaultId));
   } catch (e) { next(e); }
 };
@@ -16,53 +38,32 @@ const getHistory = (req, res, next) => {
 const allocate = (req, res, next) => {
   try {
     const vaultId = Number(req.params.id);
-    const transactionId = Number(req.body.transaction_id);
+    const amountCents = parseAmount(req.body.amount);
+    const vault = requireVault(req.userId, vaultId);
 
-    if (!transactionId) { const e = new Error('Missing required field: transaction_id'); e.status = 400; throw e; }
-
-    const vault = VaultModel.findById(req.userId, vaultId);
-    if (!vault) { const e = new Error('Vault not found'); e.status = 404; throw e; }
-
-    const txn = TransactionModel.findByIdRaw(req.userId, transactionId);
-    if (!txn) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
-    if (txn.type !== 'income') {
-      const e = new Error('Only income transactions can be allocated to a vault');
+    if (amountCents > availableCents(req.userId)) {
+      const e = new Error('Insufficient available balance: cannot allocate more than is spendable');
       e.status = 400; throw e;
     }
 
-    // If moving from another vault, log a withdraw from the old vault first
-    if (txn.vault_id && txn.vault_id !== vaultId) {
-      history.add(req.userId, txn.vault_id, transactionId, 'withdraw', txn.amount);
-    }
-
-    TransactionModel.setVaultId(req.userId, transactionId, vaultId);
-    history.add(req.userId, vaultId, transactionId, 'allocate', txn.amount);
-
-    res.json(VaultModel.findById(req.userId, vaultId));
+    history.add(req.userId, vaultId, 'allocate', amountCents);
+    res.json(vaultView(req.userId, vault));
   } catch (e) { next(e); }
 };
 
 const withdraw = (req, res, next) => {
   try {
     const vaultId = Number(req.params.id);
-    const transactionId = Number(req.body.transaction_id);
+    const amountCents = parseAmount(req.body.amount);
+    const vault = requireVault(req.userId, vaultId);
 
-    if (!transactionId) { const e = new Error('Missing required field: transaction_id'); e.status = 400; throw e; }
-
-    const vault = VaultModel.findById(req.userId, vaultId);
-    if (!vault) { const e = new Error('Vault not found'); e.status = 404; throw e; }
-
-    const txn = TransactionModel.findByIdRaw(req.userId, transactionId);
-    if (!txn) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
-    if (txn.vault_id !== vaultId) {
-      const e = new Error('Transaction is not allocated to this vault');
+    if (amountCents > vaultBalanceCents(req.userId, vaultId)) {
+      const e = new Error('Cannot withdraw more than the vault balance');
       e.status = 400; throw e;
     }
 
-    TransactionModel.setVaultId(req.userId, transactionId, null);
-    history.add(req.userId, vaultId, transactionId, 'withdraw', txn.amount);
-
-    res.json(VaultModel.findById(req.userId, vaultId));
+    history.add(req.userId, vaultId, 'withdraw', amountCents);
+    res.json(vaultView(req.userId, vault));
   } catch (e) { next(e); }
 };
 

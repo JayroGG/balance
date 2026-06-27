@@ -2,10 +2,10 @@
 const db = require('../../../config/db');
 const { toDecimal } = require('../../../lib/money');
 
-const add = (userId, vaultId, transactionId, action, amountCents) =>
+const add = (userId, vaultId, action, amountCents) =>
   db.prepare(
-    `INSERT INTO vault_history (user_id, vault_id, transaction_id, action, amount) VALUES (?, ?, ?, ?, ?)`
-  ).run(userId, vaultId, transactionId, action, amountCents);
+    `INSERT INTO vault_history (user_id, vault_id, action, amount) VALUES (?, ?, ?, ?)`
+  ).run(userId, vaultId, action, amountCents);
 
 const findByVault = (userId, vaultId) =>
   db.prepare(

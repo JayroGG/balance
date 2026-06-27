@@ -30,3 +30,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 |-----|-------|--------|
 | [ADR-001](ADR-001-auth-strategy.md) | Authentication as a modular layer (DB-hashed now, Auth0 north star) | Accepted |
 | [ADR-002](ADR-002-documentation-and-workflow-standard.md) | Documentation & agent-workflow standard | Accepted |
+| [ADR-003](ADR-003-session-validation.md) | Stateful session validation over JWT (DB-backed sessions) | Proposed |

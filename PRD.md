@@ -24,7 +24,6 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 - No authentication yet (single seeded user).
 - No multi-currency (single currency, configurable label).
 - No budgets, recurring transactions, or reporting/analytics.
-- No partial-amount vault withdrawals (see §6).
 
 ## 4. Locked Decisions
 
@@ -37,8 +36,8 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Auth** | Single seeded user (`user_id = 1`) now; schema + middleware designed for later DB-backed hashed auth. |
 | **Money** | Stored as **integer cents** in SQLite; API speaks **decimals** (e.g. `19.99`). Converted at the boundary. |
 | **Categories** | First-class resource with CRUD + soft delete; transactions reference a category. |
-| **Vaults** | Funded by **tagging income** with `vault_id` (mutable). Detaching (`vault_id → NULL`) = withdrawal → money becomes spendable. No direct spending from a vault. Allocate/withdraw logged in `vault_history`. |
-| **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. |
+| **Vaults** | Funded by **allocating an amount** of spendable money into a vault; **withdrawing** an amount returns it to spendable. Movements are recorded in the append-only `vault_history` ledger — its source of truth. No direct spending from a vault. (Corrected in ADR-004.) |
+| **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. Computed live; `available` is a hard `≥ 0` invariant. |
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
 
 ## 5. Data Model
@@ -48,47 +47,51 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **users** — `id, email, password_hash (nullable for now), …`
 - **categories** — `id, user_id, name, kind ('income'|'expense'|'both'), …`
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
-- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), vault_id (FK→vaults, nullable; only valid when type='income'), description, occurred_at, …`
-- **vault_history** — `id, user_id, vault_id, transaction_id, action ('allocate'|'withdraw'), amount (cents), created_at` — audit trail of vault movements.
+- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference.
+- **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
 
-**Invariants** (enforced in the service layer):
-- `expense` transactions must have `vault_id = NULL`.
-- `vault_id` may only reference an active (non-deleted) vault.
+**Invariants** (enforced in hooks/controller):
 - `amount` is always a positive integer; `type` carries the sign meaning.
+- `available ≥ 0` at all times — money in a vault is untouchable; any write that would push it negative is rejected `400` (see §6).
+- A vault may only be deleted when its balance is `0` (withdraw it to zero first).
 
 See `ARCHITECTURE.md` for the Mermaid ER diagram.
 
 ## 6. Vault & Balance Model
 
-Vaults are **logical allocations within a single balance**, not separate sub-accounts (the Monzo/Revolut pattern). Money allocated to a vault still belongs to net worth — it is simply not spendable until withdrawn.
+Vaults are **logical allocations within a single balance**, not separate sub-accounts (the Monzo/Revolut pattern). Money allocated to a vault still belongs to net worth — it is simply not spendable until withdrawn. Transactions are a **pure ledger**; allocation is a **separate, amount-based operation** recorded in `vault_history`. (This corrects the original design, where allocation flipped a transaction's `vault_id` and only whole transactions could move — see ADR-004.)
 
-**Balance figures** (computed live, always filtering `deleted_at IS NULL`):
+**Balance figures** (computed live, all in integer cents, always filtering `deleted_at IS NULL`):
 
-- `total` (net worth) = `SUM(income) − SUM(expense)` — **unaffected** by vault tagging or withdrawal.
-- `vault[V] balance` = `SUM(income WHERE vault_id = V)` (expenses are never vaulted).
-- `available` (spendable) = `total − SUM(all vault balances)`.
+- `total` (net worth) = `SUM(income) − SUM(expense)` — from `transactions`; **unaffected** by allocate/withdraw.
+- `vault[V] balance` = `SUM(allocate) − SUM(withdraw)` for V — from `vault_history`.
+- `locked` = `SUM(vault[V])` over active vaults.
+- `available` (spendable) = `total − locked`.
 
-**Allocate**: set an income transaction's `vault_id` to a vault (at creation or later) → vault balance ↑, available ↓; logs an `allocate` row.
+**Allocate** `POST /vaults/:id/allocate { amount }`: move spendable money into a vault → vault balance ↑, available ↓; appends an `allocate` row. Bounded by `amount ≤ available`.
 
-**Withdraw**: set the transaction's `vault_id` back to `NULL` → vault balance ↓, available ↑, net worth unchanged; logs a `withdraw` row.
+**Withdraw** `POST /vaults/:id/withdraw { amount }`: move money from a vault back to spendable → vault balance ↓, available ↑, net worth unchanged; appends a `withdraw` row. Bounded by `amount ≤ vault[V]`.
+
+**Hard invariant — `available ≥ 0`:** vaulted money is protected; to spend it you must withdraw it first. Enforced on every write that lowers `net_worth` or raises `locked` — create expense, increase expense, decrease income, delete income, and allocate all reject with `400` if they would breach it.
 
 Worked example:
 
 | Action | total | vault E | available |
 |---|---|---|---|
-| income +2000 (main) | 2000 | 0 | 2000 |
-| income +500 (vault E) | 2500 | 500 | 2000 |
-| withdraw 500 from E (detach) | 2500 | 0 | 2500 |
-| expense −100 (main) | 2400 | 0 | 2400 |
+| income +2000 | 2000 | 0 | 2000 |
+| allocate 500 → E | 2000 | 500 | 1500 |
+| expense −1500 | 500 | 500 | 0 |
+| expense −1 (would make available −1) | — | — | **rejected 400** |
+| withdraw 500 from E | 500 | 0 | 500 |
 
-**Decision — partial withdrawals (out of scope for POC):** withdrawal operates per income-transaction (detaches that transaction's full amount). Partial-amount withdrawal (splitting a transaction) is future work.
+**Derived, not stored:** balances are always computed from the two ledgers (`transactions`, `vault_history`); there is no materialized balance. A SQLite VIEW is the only sanctioned read-side convenience if ever needed (still derived, zero drift). See ADR-004 for the rationale.
 
 ## 7. API Surface
 
 ```
 # Transactions (CRUD + soft delete)
-GET    /transactions            ?type= &vault_id= &category_id=
-POST   /transactions            { type, amount, category_id?, vault_id?, description?, occurred_at? }
+GET    /transactions            ?type= &category_id=
+POST   /transactions            { type, amount, category_id?, description?, occurred_at? }
 GET    /transactions/:id
 PUT    /transactions/:id
 DELETE /transactions/:id        (soft delete)
@@ -97,10 +100,10 @@ DELETE /transactions/:id        (soft delete)
 GET/POST /categories ; GET/PUT/DELETE /categories/:id
 
 # Vaults (CRUD + soft delete) + actions
-GET/POST /vaults ; GET/PUT/DELETE /vaults/:id
-GET    /vaults/:id/history       (vault_history log)
-POST   /vaults/:id/allocate      { transaction_id }
-POST   /vaults/:id/withdraw      { transaction_id }
+GET/POST /vaults ; GET/PUT/DELETE /vaults/:id   (DELETE requires balance = 0)
+GET    /vaults/:id/history       (vault_history movement ledger)
+POST   /vaults/:id/allocate      { amount }      (≤ available)
+POST   /vaults/:id/withdraw      { amount }      (≤ vault balance)
 
 # Balance (aggregate business logic)
 GET    /balance                 { total, available, vaults:[{id,name,balance,target?}], currency }
@@ -115,8 +118,9 @@ Entity pattern: each resource lives in `src/entities/<name>/` as a generated **m
 ## 9. Phases
 
 - **Phase 1 — POC (current):** schema + migrate + seed; Categories, Vaults (with allocate/withdraw + history), Transactions, and Balance modules; environment separation; documentation/scaffolding.
-- **Phase 2 — Auth:** DB-backed users with hashed passwords; swap the POC auth middleware for real authentication; user-scope every query.
-- **Phase 3 — Enhancements:** partial vault withdrawals, multi-currency, budgets per category/period, recurring transactions, reporting/aggregation endpoints.
+- **Phase 2 — Auth:** DB-backed users with hashed passwords (ADR-003), then Auth0 + RBAC as the north star (ADR-001); swap the POC auth middleware for real authentication; user-scope every query.
+- **Phase 3 — Enhancements:** multi-currency, budgets per category/period, recurring transactions, reporting/aggregation endpoints.
+- **Phase 4 — Bank/account integrations (future, post-Auth0):** import transactions automatically from a linked account/card via a banking aggregator (e.g. **Pluggy** or **Belvo** for Nubank / Open Finance Brasil — Google Wallet has no transaction-read API, so it's out). Depends on real auth being in place (per-user tokens). Needs a `connections`/`accounts` concept, an import service mapping external transactions → the `transactions` ledger, and idempotent sync (`external_id` + `source` on transactions). Aggregator choice (Pluggy vs. Belvo) is its own ADR when this starts.
 
 ## 10. Workflow & Documentation Deliverables
 

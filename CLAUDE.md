@@ -34,13 +34,13 @@ NODE_ENV=prod  npm start         # boot against the prod DB/config
 
 ### Vault / balance model (the core logic)
 
-Vaults are logical allocations within one balance, not separate accounts.
+Vaults are logical allocations within one balance, not separate accounts. Transactions are a **pure ledger**; allocation is a **separate, amount-based** operation. Balances are **derived live** from two ledgers — never stored (see ADR-004). Cent-level helpers live in `entities/balance/db/queries.js`.
 
-- `total` (net worth) = `SUM(income) − SUM(expense)` — unaffected by vaults.
-- `vault[V] balance` = `SUM(income WHERE vault_id = V)`.
+- `total` (net worth) = `SUM(income) − SUM(expense)` — from `transactions`; unaffected by vaults.
+- `vault[V] balance` = `SUM(allocate) − SUM(withdraw)` for V — from `vault_history`.
 - `available` (spendable) = `total − SUM(all vault balances)`.
 
-Allocate = set an income's `vault_id`; withdraw = set it back to `NULL`. Each logs a row in `vault_history`. Expenses can never carry a `vault_id`.
+Allocate (`POST /vaults/:id/allocate { amount }`) moves spendable money into a vault (≤ available); withdraw (`{ amount }`) returns it (≤ vault balance). Each **appends** a row to the append-only `vault_history` ledger (its source of truth). **Hard invariant: `available ≥ 0`** — enforced on every write that lowers net worth or raises locked (create expense, increase expense, decrease income, delete income, allocate) → `400` if breached. A vault deletes only at balance 0.
 
 ## Key files
 
@@ -72,4 +72,4 @@ Per-project long-term memory lives in `~/.claude/projects/<path>/memory/`.
 
 - Minimal changes — only what's asked; no unrequested refactors or comments.
 - Validate at boundaries only (request bodies); trust internal guarantees.
-- Positive amounts only; `type` carries the sign. Reject `expense` + `vault_id` with `400`.
+- Positive amounts only; `type` carries the sign. Reject any write that would push `available` below 0 with `400`.

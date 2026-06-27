@@ -9,10 +9,8 @@ erDiagram
     users ||--o{ categories : owns
     users ||--o{ vaults : owns
     users ||--o{ transactions : owns
-    vaults ||--o{ transactions : "tags (income only)"
     categories ||--o{ transactions : classifies
-    vaults ||--o{ vault_history : logs
-    transactions ||--o{ vault_history : references
+    vaults ||--o{ vault_history : "balance ledger"
 
     users {
         int id PK
@@ -42,7 +40,6 @@ erDiagram
         string type "income|expense"
         int amount "cents, > 0"
         int category_id FK "nullable"
-        int vault_id FK "nullable; income only"
         string description
         date occurred_at
         datetime deleted_at "nullable"
@@ -51,9 +48,8 @@ erDiagram
         int id PK
         int user_id FK
         int vault_id FK
-        int transaction_id FK
         string action "allocate|withdraw"
-        int amount "cents"
+        int amount "cents, > 0"
         datetime created_at
     }
 ```
@@ -61,29 +57,30 @@ erDiagram
 **Notes**
 - All amounts are integer **cents**. API converts to/from decimals at the boundary.
 - All tables soft-delete via nullable `deleted_at` (`NULL` = active). Every read filters `deleted_at IS NULL`.
-- `transactions.vault_id` is **mutable** and only valid when `type = 'income'`.
+- `transactions` is a **pure ledger** — no vault reference. `vault_history` is the **append-only source of truth** for vault balances (`balance = Σallocate − Σwithdraw`). See ADR-004.
 
 ## Balance calculation flow
 
 ```mermaid
 flowchart TD
     A["GET /balance"] --> B["SUM(income) - SUM(expense)<br/>= total (net worth)"]
-    A --> C["per vault: SUM(income WHERE vault_id = V)<br/>= vault balance"]
+    A --> C["per vault: SUM(allocate) - SUM(withdraw)<br/>= vault balance (from vault_history)"]
     B --> D["available = total - SUM(all vault balances)"]
     C --> D
     D --> E["respond: { total, available, vaults[], currency }"]
 ```
 
-Allocate / withdraw lifecycle of a single income transaction:
+Allocate / withdraw move an **amount** between spendable and a vault (independent of any transaction):
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Spendable: income created (vault_id = NULL)
-    Spendable --> Vaulted: allocate (set vault_id = V) + log 'allocate'
-    Vaulted --> Spendable: withdraw (set vault_id = NULL) + log 'withdraw'
+    [*] --> Spendable: income recorded (transactions ledger)
+    Spendable --> Vaulted: allocate { amount } (≤ available) + append 'allocate'
+    Vaulted --> Spendable: withdraw { amount } (≤ vault balance) + append 'withdraw'
     note right of Vaulted
         counts toward total (net worth)
         excluded from available (spendable)
+        available can never go below 0
     end note
 ```
 
@@ -159,4 +156,5 @@ balance/
 - **Cross-entity access:** import the model file directly (e.g. `../../transactions/db/model`), never via the entity `index.js`, to avoid circular deps.
 - **Money:** stored as integer cents; the model layer (`modelGenerator` `moneyFields`) converts decimal↔cents at the read/write boundary.
 - **Auth-ready:** all tables carry `user_id`; only the auth middleware changes in Phase 2.
-- **Invariants:** positive amounts; `expense` ⇒ `vault_id = NULL`; `vault_id` references active vaults only.
+- **Balances are derived** from the two ledgers (`transactions`, `vault_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults controller.
+- **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; a vault deletes only at balance 0. See ADR-004.

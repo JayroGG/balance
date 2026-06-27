@@ -1,7 +1,6 @@
 # fly.toml — balance API
-# App name must match the Fly app (globally unique).
 app = "balance-4pi"
-primary_region = "mia"  # change to your nearest: gru (São Paulo), scl, bog, qro, mia ...
+primary_region = "iad"
 
 [build]
 
@@ -9,7 +8,7 @@ primary_region = "mia"  # change to your nearest: gru (São Paulo), scl, bog, qr
   NODE_ENV = "prod"
   PORT = "3000"
   DB_PATH = "/data/balance.prod.db"
-  CURRENCY = "USD"
+  CURRENCY = "MXN"
 
 [http_service]
   internal_port = 3000
@@ -19,11 +18,10 @@ primary_region = "mia"  # change to your nearest: gru (São Paulo), scl, bog, qr
   auto_start_machines = true
   min_machines_running = 0
 
-# Persistent volume so the SQLite file survives restarts/redeploys/scale-to-zero.
-# Create it once (same region as primary_region):
-#   fly volumes create balance_data --region mia --size 1
+# Persistent volume (Fly created it as "data") so the SQLite file survives
+# restarts / redeploys / scale-to-zero.
 [mounts]
-  source = "balance_data"
+  source = "data"
   destination = "/data"
 
 [[vm]]

@@ -13,7 +13,8 @@ COPY . .
 # --- runtime stage ---
 FROM node:22-slim
 WORKDIR /app
-ENV NODE_ENV=prod
+# Environment-agnostic image: NODE_ENV (and the rest of the config) is supplied
+# at runtime by each branch's fly.toml [env]. Defaults to "stage" via env.js.
 COPY --from=build /app ./
 EXPOSE 3000
 # migrate + seed are idempotent; safe to run on every boot before listening.

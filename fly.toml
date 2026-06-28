@@ -1,13 +1,15 @@
-# fly.toml — balance API
+# fly.toml — balance API (STAGE)
+# This branch (main) deploys to the stage app. The prod branch carries its own
+# fly.toml pointing at a separate app (e.g. balance-4pi-prod) with NODE_ENV=prod.
 app = "balance-4pi"
 primary_region = "iad"
 
 [build]
 
 [env]
-  NODE_ENV = "prod"
+  NODE_ENV = "stage"
   PORT = "3000"
-  DB_PATH = "/data/balance.prod.db"
+  DB_PATH = "/data/balance.stage.db"
   CURRENCY = "MXN"
 
 [http_service]

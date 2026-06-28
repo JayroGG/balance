@@ -70,21 +70,33 @@ GET    /balance                  { total, available, vaults:[{id,name,balance,ta
 
 ## Deployment (Fly.io)
 
-The repo ships a `Dockerfile` and `fly.toml`. The SQLite file lives on a **persistent volume** (`/data`), and the app **scales to zero** when idle (wakes on the next request) — so it costs ~nothing while unused. Config (`PORT`, `DB_PATH`, `CURRENCY`, `NODE_ENV`) is set in `fly.toml [env]`.
+The repo ships a `Dockerfile` and `fly.toml`. The SQLite file lives on a **persistent volume** (`/data`), and the app **scales to zero** when idle (wakes on the next request) — so it costs ~nothing while unused. The Docker image is **environment-agnostic**; all config (`PORT`, `DB_PATH`, `CURRENCY`, `NODE_ENV`) comes from `fly.toml [env]`.
+
+### Environment = branch = app
+
+Each environment is a **separate Fly app** with its own volume and data, configured by the `fly.toml` (and, if needed, `Dockerfile`) on its branch. Branch code can drift per environment:
+
+| Branch | Fly app | `NODE_ENV` | `DB_PATH` |
+|---|---|---|---|
+| `development` | `balance-4pi-dev` | `dev` | `/data/balance.dev.db` |
+| `main` | `balance-4pi` | `stage` | `/data/balance.stage.db` |
+| `prod-release` | `balance-4pi-prod` | `prod` | `/data/balance.prod.db` |
+
+To stand up another environment, branch off, edit `fly.toml` (`app`, `NODE_ENV`, `DB_PATH`, `CURRENCY`), then create + deploy that app. Volumes and data are fully independent per app.
 
 First-time setup ([install flyctl](https://fly.io/docs/flyctl/install/) first):
 
 ```bash
 fly auth login
 fly launch --no-deploy            # adopts fly.toml; pick a unique app name + region
-fly volumes create balance_data --region <your-region> --size 1   # match primary_region
+fly volumes create data --region <your-region> --size 1   # match primary_region + [mounts] source
 fly deploy
 ```
 
-- Keep it to a **single machine** (SQLite is one file on one volume) — `fly scale count 1`.
+- Keep each app to a **single machine** (SQLite is one file on one volume) — `fly scale count 1`.
 - `migrate` + `seed` run automatically on boot (both idempotent).
 - Open it: `fly open` · logs: `fly logs` · shell: `fly ssh console`.
-- Pushing to GitHub can auto-deploy if you connect the repo in Fly's dashboard.
+- **Deploying:** from the Fly dashboard, pick the branch to deploy (it uses *that branch's* `fly.toml`/`Dockerfile`), or from the CLI run `fly deploy` on the checked-out branch. Each branch always targets the app named in its own `fly.toml`.
 
 ## Roadmap
 

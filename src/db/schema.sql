@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS team_members (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   team_id    INTEGER NOT NULL REFERENCES teams(id),
   user_id    INTEGER NOT NULL REFERENCES users(id),
-  role       TEXT    NOT NULL CHECK (role IN ('owner', 'member')),
+  role       TEXT    NOT NULL CHECK (role IN ('owner', 'member', 'guest')),
   created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   deleted_at TEXT,
   UNIQUE (team_id, user_id)

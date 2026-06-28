@@ -4,6 +4,8 @@ const members = require('../db/members');
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
+const ROLES = ['owner', 'member', 'guest'];
+
 const requireRole = (userId, teamId, role) => {
   const current = members.roleOf(userId, teamId);
   if (!current) throw httpError('Team not found', 404);
@@ -39,13 +41,57 @@ const addMember = (req, res, next) => {
     requireRole(req.userId, teamId, 'owner');
 
     const { email, user_id, role = 'member' } = req.body;
-    if (!['owner', 'member'].includes(role)) throw httpError("role must be 'owner' or 'member'", 400);
+    if (!ROLES.includes(role)) throw httpError(`role must be one of: ${ROLES.join(', ')}`, 400);
 
     const targetId = user_id ?? members.findUserByEmail(email)?.id;
     if (!targetId) throw httpError('User not found', 404);
 
     members.addMember(teamId, targetId, role);
     res.status(201).json(members.listMembers(teamId));
+  } catch (e) { next(e); }
+};
+
+// Promote/demote a member. Owner-only; cannot demote the last owner.
+const changeRole = (req, res, next) => {
+  try {
+    const teamId = Number(req.params.id);
+    const targetId = Number(req.params.userId);
+    requireRole(req.userId, teamId, 'owner');
+
+    const { role } = req.body;
+    if (!ROLES.includes(role)) throw httpError(`role must be one of: ${ROLES.join(', ')}`, 400);
+
+    const current = members.roleOf(targetId, teamId);
+    if (!current) throw httpError('Not a member of this team', 404);
+    if (current === 'owner' && role !== 'owner' && members.countOwners(teamId) <= 1) {
+      throw httpError('Cannot demote the last owner', 400);
+    }
+
+    members.setRole(teamId, targetId, role);
+    res.json(members.listMembers(teamId));
+  } catch (e) { next(e); }
+};
+
+// Rename the team. Owner-only, by team_members role (any owner, not just the creator).
+const update = (req, res, next) => {
+  try {
+    const teamId = Number(req.params.id);
+    requireRole(req.userId, teamId, 'owner');
+    if (!req.body.name) throw httpError('Missing required field: name', 400);
+    res.json(TeamModel.rename(teamId, req.body.name));
+  } catch (e) { next(e); }
+};
+
+// Soft-delete the team. Owner-only; blocked unless the team holds no active transactions/vaults.
+const destroy = (req, res, next) => {
+  try {
+    const teamId = Number(req.params.id);
+    requireRole(req.userId, teamId, 'owner');
+    if (!members.isEmpty(teamId)) {
+      throw httpError('Cannot delete a team with active transactions or vaults', 400);
+    }
+    TeamModel.softDeleteById(teamId);
+    res.status(204).send();
   } catch (e) { next(e); }
 };
 
@@ -63,4 +109,4 @@ const removeMember = (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-module.exports = { listMine, getOne, listMembers, addMember, removeMember };
+module.exports = { listMine, getOne, listMembers, addMember, changeRole, removeMember, update, destroy };

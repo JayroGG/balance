@@ -29,10 +29,21 @@ const roleOf = (userId, teamId) => {
   return row ? row.role : undefined;
 };
 
+// Upsert: adds a member, or revives a previously removed one and (re)sets the role.
+// Plain INSERT OR IGNORE would silently fail on the UNIQUE(team_id, user_id) row left
+// behind by a soft delete, making removed members un-re-addable. (Auth0 role-sync seam:
+// future IdP role updates belong here, alongside setRole/removeMember.)
 const addMember = (teamId, userId, role) =>
   db.prepare(
-    `INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)`
+    `INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)
+       ON CONFLICT(team_id, user_id) DO UPDATE SET role = excluded.role, deleted_at = NULL`
   ).run(teamId, userId, role);
+
+const setRole = (teamId, userId, role) =>
+  db.prepare(
+    `UPDATE team_members SET role = ?
+      WHERE team_id = ? AND user_id = ? AND deleted_at IS NULL`
+  ).run(role, teamId, userId);
 
 const removeMember = (teamId, userId) =>
   db.prepare(
@@ -61,7 +72,18 @@ const findUserByEmail = (email) =>
     `SELECT id FROM users WHERE email = ? AND deleted_at IS NULL`
   ).get(email);
 
+// A team is empty (deletable) when it holds no active transactions or vaults.
+const isEmpty = (teamId) => {
+  const txns = db.prepare(
+    `SELECT COUNT(*) AS n FROM transactions WHERE team_id = ? AND deleted_at IS NULL`
+  ).get(teamId).n;
+  const vaults = db.prepare(
+    `SELECT COUNT(*) AS n FROM vaults WHERE team_id = ? AND deleted_at IS NULL`
+  ).get(teamId).n;
+  return txns === 0 && vaults === 0;
+};
+
 module.exports = {
-  teamExists, isMember, roleOf, addMember, removeMember,
-  countOwners, listMembers, findUserByEmail,
+  teamExists, isMember, roleOf, addMember, setRole, removeMember,
+  countOwners, listMembers, findUserByEmail, isEmpty,
 };

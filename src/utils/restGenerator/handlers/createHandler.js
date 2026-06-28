@@ -1,9 +1,11 @@
 'use strict';
 const { BEFORE_CREATE, CREATE } = require('../../../constants/hooks');
+const { assertCanWrite } = require('../../../lib/access');
 
 const createHandler = (entity, hook) => (req, res, next) => {
   try {
     const scope = req.context;
+    assertCanWrite(scope);
     let body = { ...req.body };
     if (hook) {
       const modified = hook({ type: BEFORE_CREATE, body, req });

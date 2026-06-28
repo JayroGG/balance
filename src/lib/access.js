@@ -4,12 +4,16 @@
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
 // Gate 1 — method capability: guests are read-only; owner/member (and personal) may write.
-const assertCanWrite = ({ role }) => {
+// A global admin (isAdmin) overrides all RBAC.
+const assertCanWrite = ({ role, isAdmin }) => {
+  if (isAdmin) return;
   if (role === 'guest') throw httpError('Guests have read-only access', 403);
 };
 
 // Gate 2 — row ownership: a team member may mutate only rows they created; owner bypasses.
-const assertOwns = ({ userId, role }, record) => {
+// A global admin bypasses ownership entirely.
+const assertOwns = ({ userId, role, isAdmin }, record) => {
+  if (isAdmin) return;
   if (role === 'member' && record.user_id !== userId) {
     throw httpError('Members can only modify records they created', 403);
   }

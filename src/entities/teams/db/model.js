@@ -21,6 +21,10 @@ const listForMember = (userId) =>
 const getById = (teamId) =>
   db.prepare(`SELECT * FROM teams WHERE id = ? AND deleted_at IS NULL`).get(teamId);
 
+// All teams (admin god-mode list). role tagged 'admin' to match the listForMember shape.
+const listAll = () =>
+  db.prepare(`SELECT *, 'admin' AS role FROM teams WHERE deleted_at IS NULL ORDER BY name`).all();
+
 // Mutations authorized by team_members role (any owner), not creator scope, so they
 // are by-id rather than user-scoped (unlike the generated update/softDelete).
 const rename = (teamId, name) => {
@@ -34,6 +38,6 @@ const softDeleteById = (teamId) =>
 
 const TeamModel = {
   ...modelGenerator(ENTITY_NAME, fields),
-  listForMember, getById, rename, softDeleteById,
+  listForMember, getById, listAll, rename, softDeleteById,
 };
 module.exports = { TeamModel };

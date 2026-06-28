@@ -7,11 +7,12 @@ const { currency } = require('../../../config/env');
 // A scope is { userId, teamId }. teamId null -> personal (the user's own,
 // untagged rows); teamId set -> that team's rows (membership verified upstream).
 
-// SQL fragment + value to scope a table's rows to the context.
-const where = ({ userId, teamId }) =>
+// SQL fragment + value to scope a table's rows to the context. An admin's chosen
+// team flows through teamId; an admin targeting a user's personal data sets targetUserId.
+const where = ({ userId, teamId, targetUserId }) =>
   teamId != null
     ? { sql: 'team_id = ?', value: teamId }
-    : { sql: 'user_id = ? AND team_id IS NULL', value: userId };
+    : { sql: 'user_id = ? AND team_id IS NULL', value: targetUserId != null ? targetUserId : userId };
 
 // net worth = SUM(income) - SUM(expense)
 const netWorthCents = (scope) => {

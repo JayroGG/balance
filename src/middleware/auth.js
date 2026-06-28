@@ -5,10 +5,16 @@
 const jwt = require('jsonwebtoken');
 const { authBypass, nodeEnv, jwtSecret } = require('../config/env');
 const sessions = require('../entities/auth/db/sessions');
+const users = require('../entities/auth/db/users');
 
-const setIdentity = (req, userId, sessionId) => {
+// `role` here is the GLOBAL role ('user'|'admin'). context.role is the per-team
+// role (set later by resolveContext); the two are independent. isAdmin overrides
+// team RBAC, membership, and ownership everywhere downstream.
+const setIdentity = (req, userId, sessionId, role) => {
+  const isAdmin = role === 'admin';
   req.userId = userId;
-  req.context = { userId, teamId: null, role: null };
+  req.isAdmin = isAdmin;
+  req.context = { userId, teamId: null, role: null, isAdmin };
   if (sessionId != null) req.sessionId = sessionId;
 };
 
@@ -16,8 +22,9 @@ const unauthorized = () => Object.assign(new Error('Unauthorized'), { status: 40
 
 module.exports = (req, res, next) => {
   // Bypass stub (ADR-001) — stage only; env.js already blocks it in prod.
+  // Read the seeded user's role from the DB so admin can be exercised under bypass.
   if (authBypass && nodeEnv === 'stage') {
-    setIdentity(req, 1);
+    setIdentity(req, 1, undefined, users.roleById(1));
     return next();
   }
 
@@ -26,7 +33,7 @@ module.exports = (req, res, next) => {
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) throw unauthorized();
 
-    const { sub, jti } = jwt.verify(token, jwtSecret); // throws on bad sig / expiry
+    const { sub, jti, role } = jwt.verify(token, jwtSecret); // throws on bad sig / expiry
     const session = sessions.findById(Number(jti));
 
     // Token proves who; the session row proves still-allowed (real logout).
@@ -34,7 +41,7 @@ module.exports = (req, res, next) => {
       throw unauthorized();
     }
 
-    setIdentity(req, sub, session.id);
+    setIdentity(req, sub, session.id, role);
     next();
   } catch (e) {
     next(e.status ? e : unauthorized()); // jwt errors -> 401

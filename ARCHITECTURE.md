@@ -108,6 +108,21 @@ money conversion, user-scope + `deleted_at IS NULL`) and `restGenerator` (GET `/
 POST `/`, PUT `/:id`, DELETE `/:id`). Hook constants: `BEFORE_CREATE`, `CREATE`, `BEFORE_UPDATE`,
 `UPDATE`, `LIST_ALL`, `GET_ONE`, `BEFORE_DESTROY`, `DESTROY`.
 
+### RBAC (team context) — ADR-005
+
+`resolveContext` resolves the caller's `team_members.role` (`owner | member | guest`) onto
+`req.context = { userId, teamId, role }` (personal context → `role: null`). Two gates, centralized in
+`src/lib/access.js` and called from the `restGenerator` write handlers (create/update/destroy) and the
+custom vault write routes (allocate/withdraw):
+
+- **Gate 1 (capability):** `guest` is read-only; owner/member/personal may write.
+- **Gate 2 (ownership):** for edit/delete/allocate/withdraw, a `member` may act only on rows they
+  created; `owner` bypasses; personal is already `user_id = self`-scoped (no-op).
+
+Reads (GET) are open to all roles. Team management (rename/delete/add/remove/change-role) is
+owner-only **by role** (not `teams.user_id`), so multiple owners work. `team_members.role` now
+includes `guest`. The `modelGenerator` is unchanged — ownership is decided in the handler layer.
+
 ## Directory map
 
 ```
@@ -158,3 +173,4 @@ balance/
 - **Auth-ready:** all tables carry `user_id`; only the auth middleware changes in Phase 2.
 - **Balances are derived** from the two ledgers (`transactions`, `vault_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults controller.
 - **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; a vault deletes only at balance 0. See ADR-004.
+- **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.

@@ -17,6 +17,11 @@ db.exec(schema);
 // Idempotent seed
 db.prepare(`INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`).run();
 
-app.listen(config.port, () => {
-  console.log(`balance API running on port ${config.port} [${config.nodeEnv}]`);
+// Bind 0.0.0.0 explicitly so the container is reachable (Fly, Docker).
+app.listen(config.port, '0.0.0.0', () => {
+  console.log(
+    `balance API listening on 0.0.0.0:${config.port} ` +
+    `[${config.nodeEnv}] authBypass=${config.authBypass} ` +
+    `jwtSecret=${config.jwtSecret ? 'set' : 'MISSING'} db=${config.dbPath}`
+  );
 });

@@ -5,10 +5,15 @@ const nodeEnv = process.env.NODE_ENV || 'stage';
 const authBypass = process.env.AUTH_BYPASS === 'true';
 
 const required = ['PORT', 'DB_PATH', 'CURRENCY'];
-// Real auth needs a signing secret; only the bypass stub can run without it.
-if (!authBypass) required.push('JWT_SECRET');
 for (const key of required) {
   if (!process.env[key]) throw new Error(`Missing required env var: ${key}`);
+}
+// Real auth needs a signing secret; only the bypass stub can run without it.
+if (!authBypass && !process.env.JWT_SECRET) {
+  throw new Error(
+    'Missing required env var: JWT_SECRET — set it as a secret ' +
+    '(fly secrets set JWT_SECRET=...), or set AUTH_BYPASS=true for stage-only dev'
+  );
 }
 
 // Fail closed: the bypass must never be enabled in production.

@@ -15,8 +15,12 @@ const {
 const app = express();
 
 app.use(express.json());
-app.use((req, _res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+// Log every request's outcome: method, url, status, and duration.
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - start}ms`);
+  });
   next();
 });
 

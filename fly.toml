@@ -6,11 +6,17 @@ primary_region = "iad"
 
 [build]
 
+# Non-sensitive config only. SECRETS LIVE IN FLY SECRETS, never here:
+#   fly secrets set JWT_SECRET=<long-random> SEED_PASSWORD=<password> -a balance-4pi
+# (fly.toml is committed plaintext — putting a secret here would leak it.)
+# AUTH_BYPASS is unset -> false -> real auth (JWT_SECRET required). Set it to
+# "true" here for frictionless stage dev with no token (user 1); never in prod.
 [env]
   NODE_ENV = "stage"
   PORT = "3000"
   DB_PATH = "/data/balance.stage.db"
   CURRENCY = "MXN"
+  JWT_EXPIRES_IN = "7d"
 
 [http_service]
   internal_port = 3000

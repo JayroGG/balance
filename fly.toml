@@ -14,7 +14,9 @@ primary_region = "iad"
 [env]
   NODE_ENV = "stage"
   PORT = "3000"
-  DB_PATH = "/data/balance.stage.db"
+  # Fresh file for the multi-tenant schema. The old /data/balance.stage.db
+  # predates team_id; data is disposable, so we start clean rather than migrate.
+  DB_PATH = "/data/balance.stage.v2.db"
   CURRENCY = "MXN"
   JWT_EXPIRES_IN = "7d"
   AUTH_BYPASS = "false"

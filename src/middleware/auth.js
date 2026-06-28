@@ -8,7 +8,7 @@ const sessions = require('../entities/auth/db/sessions');
 
 const setIdentity = (req, userId, sessionId) => {
   req.userId = userId;
-  req.context = { userId, teamId: null };
+  req.context = { userId, teamId: null, role: null };
   if (sessionId != null) req.sessionId = sessionId;
 };
 

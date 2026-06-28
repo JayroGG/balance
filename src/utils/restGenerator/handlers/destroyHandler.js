@@ -1,5 +1,6 @@
 'use strict';
 const { BEFORE_DESTROY, DESTROY } = require('../../../constants/hooks');
+const { assertCanMutate } = require('../../../lib/access');
 
 const destroyHandler = (entity, hook) => (req, res, next) => {
   try {
@@ -7,6 +8,7 @@ const destroyHandler = (entity, hook) => (req, res, next) => {
     const scope = req.context;
     const record = entity.findById(scope, id);
     if (!record) { const e = new Error('Not found'); e.status = 404; throw e; }
+    assertCanMutate(scope, record);
     if (hook) hook({ type: BEFORE_DESTROY, record, req });
     entity.softDelete(scope, id);
     if (hook) hook({ type: DESTROY, record, req });

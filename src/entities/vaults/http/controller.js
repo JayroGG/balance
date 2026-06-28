@@ -4,6 +4,7 @@ const history = require('../db/history');
 const { toCents, toDecimal } = require('../../../lib/money');
 // Import balance queries directly to avoid circular index deps
 const { availableCents, vaultBalanceCents } = require('../../balance/db/queries');
+const { assertCanMutate } = require('../../../lib/access');
 
 // Vault record + its derived balance (the shape the mobile client consumes).
 const vaultView = (scope, vault) => ({
@@ -40,6 +41,7 @@ const allocate = (req, res, next) => {
     const vaultId = Number(req.params.id);
     const amountCents = parseAmount(req.body.amount);
     const vault = requireVault(req.context, vaultId);
+    assertCanMutate(req.context, vault);
 
     if (amountCents > availableCents(req.context)) {
       const e = new Error('Insufficient available balance: cannot allocate more than is spendable');
@@ -56,6 +58,7 @@ const withdraw = (req, res, next) => {
     const vaultId = Number(req.params.id);
     const amountCents = parseAmount(req.body.amount);
     const vault = requireVault(req.context, vaultId);
+    assertCanMutate(req.context, vault);
 
     if (amountCents > vaultBalanceCents(req.context, vaultId)) {
       const e = new Error('Cannot withdraw more than the vault balance');

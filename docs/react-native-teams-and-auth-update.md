@@ -1,8 +1,9 @@
 # Frontend update — Teams (shared finance) + Login
 
-Brief for the React Native agent. Two backend changes you must integrate:
+Brief for the React Native agent. Three backend changes you must integrate:
 1. **Auth** — every request now needs a Bearer token (login/logout flow below).
 2. **Team context** — transactions, vaults, categories, and balance are now either **personal** or **team** scoped via a `?team_id=` query param.
+3. **Roles (RBAC)** — within a team you have a role (`owner | member | guest`) that governs what you can do. `GET /teams` now returns your `role` per team; drive screen affordances from it (see §2.1).
 
 The response **shapes are unchanged**; rows just gained a `team_id` field. The FE decides how to present personal vs team separation.
 
@@ -46,25 +47,44 @@ These endpoints accept an optional `team_id` **query param** — omit for person
 
 Each record now includes `team_id` (`null` = personal). Same fields otherwise.
 
+### 2.1 Roles within a team (RBAC)
+
+Your `role` (from `GET /teams`) decides what you can do in that team's context. **Reads are open to
+everyone**; writes differ:
+
+| Role | Read (GET) | Create | Edit / Delete / Allocate / Withdraw |
+|---|---|---|---|
+| **owner** | all team rows | ✅ | ✅ any row (admin) |
+| **member** | all team rows | ✅ | ✅ **only rows you created** |
+| **guest** | all team rows | ❌ | ❌ (read-only) |
+
+- A **member** editing/deleting/allocating on a row **someone else created** → `403`. Hide or disable
+  those controls on rows where `record.user_id` ≠ the logged-in user (unless you're an owner).
+- A **guest** sees everything but can't write → render team screens read-only when `role === 'guest'`.
+- **Personal context** (no `team_id`) is always fully yours — full create/edit/delete on your data.
+
 ---
 
 ## 3. Teams API (new)
 
 | Method | Path | Body | Who | Notes |
 |---|---|---|---|---|
-| `GET` | `/teams` | — | any | teams **I belong to** (owner or member) |
+| `GET` | `/teams` | — | any | teams **I belong to**; each item includes my `role` |
 | `POST` | `/teams` | `{ name }` | any | creates team; I become `owner` |
-| `GET` | `/teams/:id` | — | member | team detail |
+| `GET` | `/teams/:id` | — | any member | team detail |
 | `PUT` | `/teams/:id` | `{ name }` | owner | rename |
-| `DELETE` | `/teams/:id` | — | owner | soft-delete the team |
-| `GET` | `/teams/:id/members` | — | member | `[{ user_id, role, email }]` |
-| `POST` | `/teams/:id/members` | `{ email }` or `{ user_id }`, optional `role` (`member`/`owner`, default `member`) | owner | add a member; returns the member list |
+| `DELETE` | `/teams/:id` | — | owner | soft-delete the team (must be empty) |
+| `GET` | `/teams/:id/members` | — | any member | `[{ user_id, role, email }]` |
+| `POST` | `/teams/:id/members` | `{ email }` or `{ user_id }`, optional `role` (`owner`/`member`/`guest`, default `member`) | owner | add/revive a member; returns the member list |
+| `PUT` | `/teams/:id/members/:userId` | `{ role }` (`owner`/`member`/`guest`) | owner | **promote/demote**; returns the member list |
 | `DELETE` | `/teams/:id/members/:userId` | — | owner | remove a member |
 
 Membership rules to surface:
-- Only an **owner** can add/remove members or edit/delete the team.
-- Adding by an email that has no user → `404 { "error": "User not found" }`.
-- You **cannot remove the last owner** of a team → `400`.
+- Only an **owner** can add/remove members, change roles, or rename/delete the team.
+- `GET /teams` returns each team tagged with your `role` — use it to group owned-vs-invited and to gate UI.
+- Adding by an email that has no user → `404 { "error": "User not found" }`. Re-adding a previously removed member works (it revives them with the given role).
+- You **cannot remove or demote the last owner** of a team → `400`.
+- A team can only be **deleted when empty** (no active transactions or vaults) → otherwise `400`.
 
 ---
 
@@ -76,7 +96,7 @@ All errors are `{ "error": "<message>" }` with these statuses:
 |---|---|
 | `400` | bad input (missing field, invalid `team_id`); **business rule broken** — e.g. expense/allocate beyond available, withdraw beyond vault balance, deleting a non-empty vault, removing the last owner |
 | `401` | no/invalid/expired/revoked token, or failed login |
-| `403` | passing a `team_id` for a team you're not a member of; member-only action attempted by a non-member; owner-only action by a non-owner |
+| `403` | passing a `team_id` for a team you're not a member of; owner-only action by a non-owner; **guest** attempting any write; **member** editing/deleting/allocating on a row they didn't create |
 | `404` | resource not found, unknown `team_id`, add-member email not found |
 
 **Business restrictions the UI should enforce/expect (per context — personal or the selected team):**
@@ -95,5 +115,6 @@ All errors are `{ "error": "<message>" }` with these statuses:
 - [ ] Logout button → `POST /auth/logout`, then clear token.
 - [ ] A context switcher (Personal / each of my teams from `GET /teams`); when a team is selected, append `?team_id=<id>` to transactions/vaults/categories/balance calls.
 - [ ] Never send `team_id` in bodies.
-- [ ] Team management screen (create team, list/add/remove members) using the Teams API.
+- [ ] Gate UI by `role`: read-only for `guest`; for `member` hide edit/delete/allocate on rows they didn't create; full controls for `owner`.
+- [ ] Team management screen (create team, rename/delete, list/add/remove members, **change role**) — owner-only controls; uses the Teams API.
 - [ ] Surface `400` business messages (insufficient available, etc.) to the user.

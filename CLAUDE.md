@@ -31,6 +31,8 @@ NODE_ENV=prod  npm start         # boot against the prod DB/config
 - **Money:** stored as integer **cents**; API speaks **decimals**. The model layer converts decimal↔cents via `moneyFields` (`src/lib/money.js`).
 - **Auth-ready:** `middleware/auth.js` injects `req.userId = 1` for now. Every table has `user_id`; swap this middleware for real auth in Phase 2 without touching queries.
 - **Soft deletion:** every table has a nullable `deleted_at`. All reads filter `deleted_at IS NULL`; deletes set the timestamp. Soft-deleted resources return `404`.
+- **Teams & context:** every financial table carries a nullable `team_id`. A request runs in one context, set by `?team_id=` and resolved by `middleware/resolveContext.js` into `req.context = { userId, teamId, role }` (omitted = personal, `role: null`). `team_members` records membership + role.
+- **RBAC (ADR-005):** team roles `owner | member | guest` on `team_members`. Two gates centralized in `src/lib/access.js` (`assertCanWrite`/`assertOwns`/`assertCanMutate`), called from the `restGenerator` write handlers and the vault allocate/withdraw routes: guests are read-only; members write only rows they created; owners bypass ownership. Reads are open to all roles. Team management (rename/delete/add/remove/change-role) is owner-only **by role** (not `teams.user_id`); a team deletes only when empty. Role writes funnel through `teams/db/members.js`.
 
 ### Vault / balance model (the core logic)
 

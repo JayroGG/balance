@@ -107,9 +107,36 @@ POST   /vaults/:id/withdraw      { amount }      (≤ vault balance)
 
 # Balance (aggregate business logic)
 GET    /balance                 { total, available, vaults:[{id,name,balance,target?}], currency }
+
+# Teams (multi-tenant context) + membership management
+GET    /teams                   list teams I belong to, each tagged with my `role`
+POST   /teams                   { name }        (any user; creator becomes first owner)
+GET    /teams/:id               (any member)
+PUT    /teams/:id               { name }        (owner-only; rename)
+DELETE /teams/:id               (owner-only; blocked unless team has no active transactions/vaults)
+GET    /teams/:id/members       (any member)
+POST   /teams/:id/members       { email|user_id, role }   (owner-only; add/revive member)
+PUT    /teams/:id/members/:userId  { role }     (owner-only; promote/demote; can't demote last owner)
+DELETE /teams/:id/members/:userId  (owner-only; can't remove last owner)
+
+# Context switching: every financial endpoint takes an optional ?team_id=
+#   omitted -> personal (user_id = me AND team_id IS NULL)
+#   present -> that team's data (membership verified; role enforced)
 ```
 
-Amounts in requests/responses are **decimals**. Soft-deleted resources return `404`. Standard status codes (`200/201/400/404/500`).
+Amounts in requests/responses are **decimals**. Soft-deleted resources return `404`. Standard status codes (`200/201/400/404/500`); RBAC denials return `403`.
+
+### Roles & permissions (team context) — ADR-005
+
+Membership carries a role: **owner | member | guest**. Two gates, enforced uniformly across
+transactions, vaults, categories, balance:
+
+- **Read (GET):** all roles see *all* the team's rows.
+- **Create / edit / delete / allocate / withdraw:** **guest** is denied (read-only); **member** may
+  create, and edit/delete/allocate only rows **they created**; **owner** bypasses ownership (full
+  access). **Personal context** (`team_id` null) is always `user_id = self` — full self-management.
+- **Team management** (rename, delete, add/remove member, change role) is **owner-only by
+  `team_members.role`** (multiple owners supported; the creator is not privileged).
 
 ## 8. Architecture (summary)
 

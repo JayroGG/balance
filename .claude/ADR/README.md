@@ -32,3 +32,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-002](ADR-002-documentation-and-workflow-standard.md) | Documentation & agent-workflow standard | Accepted |
 | [ADR-003](ADR-003-session-validation.md) | Stateful session validation over JWT (DB-backed sessions) | Proposed (deferred) |
 | [ADR-004](ADR-004-vault-allocation-model.md) | Vaults decoupled from transactions; amount-based allocation over a derived-balance ledger | Accepted |
+| [ADR-005](ADR-005-team-rbac.md) | Team RBAC: owner/member/guest with a two-gate (method + ownership) model | Accepted |

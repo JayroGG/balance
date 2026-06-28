@@ -10,7 +10,7 @@ const vaultHooks = ({ type, body, record, req }) => {
       return;
 
     case BEFORE_DESTROY:
-      if (vaultBalanceCents(req.userId, record.id) !== 0) {
+      if (vaultBalanceCents(req.context, record.id) !== 0) {
         const e = new Error('Cannot delete a vault with a non-zero balance; withdraw it to zero first');
         e.status = 400; throw e;
       }

@@ -7,9 +7,11 @@ const add = (userId, vaultId, action, amountCents) =>
     `INSERT INTO vault_history (user_id, vault_id, action, amount) VALUES (?, ?, ?, ?)`
   ).run(userId, vaultId, action, amountCents);
 
-const findByVault = (userId, vaultId) =>
+// Scoped by vault only — the vault is authorized via context upstream, and a
+// vault's full movement history (across all member actors) is the ledger.
+const findByVault = (vaultId) =>
   db.prepare(
-    `SELECT * FROM vault_history WHERE user_id = ? AND vault_id = ? ORDER BY created_at DESC`
-  ).all(userId, vaultId).map((h) => ({ ...h, amount: toDecimal(h.amount) }));
+    `SELECT * FROM vault_history WHERE vault_id = ? ORDER BY created_at DESC`
+  ).all(vaultId).map((h) => ({ ...h, amount: toDecimal(h.amount) }));
 
 module.exports = { add, findByVault };

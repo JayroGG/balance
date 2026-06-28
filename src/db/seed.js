@@ -4,6 +4,14 @@ const db = require('../config/db');
 db.prepare(
   `INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`
 ).run();
+db.prepare(`UPDATE users SET active = 1, verified = 1 WHERE id = 1`).run();
+
+// A team owned by user 1 + its owner membership, so team-context flows are
+// testable under the AUTH_BYPASS stub.
+db.prepare(`INSERT OR IGNORE INTO teams (id, user_id, name) VALUES (1, 1, 'Household')`).run();
+db.prepare(
+  `INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (1, 1, 'owner')`
+).run();
 
 const defaultCategories = [
   { name: 'Salary',     kind: 'income'  },

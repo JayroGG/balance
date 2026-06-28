@@ -4,5 +4,6 @@ const fields = {
   update:       ['name', 'target_amount'],
   moneyFields:  ['target_amount'],
   filterFields: [],
+  teamScoped:   true,
 };
 module.exports = { fields };

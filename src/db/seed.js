@@ -1,10 +1,14 @@
 'use strict';
+const bcrypt = require('bcryptjs');
 const db = require('../config/db');
+const { seedPassword } = require('../config/env');
 
 db.prepare(
   `INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`
 ).run();
-db.prepare(`UPDATE users SET active = 1, verified = 1 WHERE id = 1`).run();
+db.prepare(
+  `UPDATE users SET active = 1, verified = 1, password_hash = ? WHERE id = 1`
+).run(bcrypt.hashSync(seedPassword, 10));
 
 // A team owned by user 1 + its owner membership, so team-context flows are
 // testable under the AUTH_BYPASS stub.

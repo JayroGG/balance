@@ -9,6 +9,7 @@ const {
   TransactionsEntity,
   BalanceEntity,
   TeamsEntity,
+  AuthEntity,
 } = require('./entities');
 
 const app = express();
@@ -18,7 +19,14 @@ app.use((req, _res, next) => {
   console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
   next();
 });
+
+// Public auth routes (login) must run BEFORE the identity middleware.
+app.use('/auth', AuthEntity.publicRoutes);
+
 app.use(auth);
+
+// Protected auth routes (logout) need a validated token.
+app.use('/auth', AuthEntity.protectedRoutes);
 
 // `context: true` mounts resolveContext so ?team_id= switches the request context.
 // Teams are managed via team_members, not context, so they opt out.

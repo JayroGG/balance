@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   email         TEXT    NOT NULL UNIQUE,
   password_hash TEXT,
+  role          TEXT    NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   active        INTEGER NOT NULL DEFAULT 1,
   verified      INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),

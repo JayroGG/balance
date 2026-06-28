@@ -6,31 +6,37 @@ const httpError = (message, status) => Object.assign(new Error(message), { statu
 
 const ROLES = ['owner', 'member', 'guest'];
 
-const requireRole = (userId, teamId, role) => {
-  const current = members.roleOf(userId, teamId);
+// A global admin bypasses team-role requirements entirely (god-mode).
+const requireRole = (req, teamId, role) => {
+  if (req.isAdmin) return 'admin';
+  const current = members.roleOf(req.userId, teamId);
   if (!current) throw httpError('Team not found', 404);
   if (role && current !== role) throw httpError(`Requires team ${role} role`, 403);
   return current;
 };
 
-// Teams I belong to (member or owner), not just the ones I created.
+// Teams I belong to (member or owner), not just the ones I created. Admin sees all teams.
 const listMine = (req, res, next) => {
-  try { res.json(TeamModel.listForMember(req.userId)); } catch (e) { next(e); }
+  try {
+    res.json(req.isAdmin ? TeamModel.listAll() : TeamModel.listForMember(req.userId));
+  } catch (e) { next(e); }
 };
 
 // Member-only detail (the generated GET /:id is owner-scoped and would hide member-only teams).
 const getOne = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
-    requireRole(req.userId, teamId);
-    res.json(TeamModel.getById(teamId));
+    requireRole(req, teamId);
+    const team = TeamModel.getById(teamId);
+    if (!team) throw httpError('Team not found', 404);
+    res.json(team);
   } catch (e) { next(e); }
 };
 
 const listMembers = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
-    requireRole(req.userId, teamId);
+    requireRole(req, teamId);
     res.json(members.listMembers(teamId));
   } catch (e) { next(e); }
 };
@@ -38,7 +44,7 @@ const listMembers = (req, res, next) => {
 const addMember = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
-    requireRole(req.userId, teamId, 'owner');
+    requireRole(req, teamId, 'owner');
 
     const { email, user_id, role = 'member' } = req.body;
     if (!ROLES.includes(role)) throw httpError(`role must be one of: ${ROLES.join(', ')}`, 400);
@@ -56,7 +62,7 @@ const changeRole = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
     const targetId = Number(req.params.userId);
-    requireRole(req.userId, teamId, 'owner');
+    requireRole(req, teamId, 'owner');
 
     const { role } = req.body;
     if (!ROLES.includes(role)) throw httpError(`role must be one of: ${ROLES.join(', ')}`, 400);
@@ -76,7 +82,7 @@ const changeRole = (req, res, next) => {
 const update = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
-    requireRole(req.userId, teamId, 'owner');
+    requireRole(req, teamId, 'owner');
     if (!req.body.name) throw httpError('Missing required field: name', 400);
     res.json(TeamModel.rename(teamId, req.body.name));
   } catch (e) { next(e); }
@@ -86,7 +92,7 @@ const update = (req, res, next) => {
 const destroy = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
-    requireRole(req.userId, teamId, 'owner');
+    requireRole(req, teamId, 'owner');
     if (!members.isEmpty(teamId)) {
       throw httpError('Cannot delete a team with active transactions or vaults', 400);
     }
@@ -99,7 +105,7 @@ const removeMember = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
     const targetId = Number(req.params.userId);
-    requireRole(req.userId, teamId, 'owner');
+    requireRole(req, teamId, 'owner');
 
     if (members.roleOf(targetId, teamId) === 'owner' && members.countOwners(teamId) <= 1) {
       throw httpError('Cannot remove the last owner', 400);

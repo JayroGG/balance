@@ -25,16 +25,29 @@ const modelGenerator = (tableName, fields) => {
     return out;
   };
 
-  // Build the context WHERE clause from a scope { userId, teamId }.
+  // Build the list WHERE clause from a scope { userId, teamId, isAdmin, targetUserId }.
+  // - admin: a chosen team (any, no membership), or a chosen user's personal data
+  //   (?user_id=), else the admin's own personal rows.
   // - team-scoped + teamId set -> team rows (any member); membership is verified upstream.
   // - team-scoped + no teamId  -> personal rows only (user's own, not tagged to a team).
   // - not team-scoped          -> the user's own rows (teamId ignored).
-  const scopeClause = ({ userId, teamId }) => {
+  const scopeClause = ({ userId, teamId, isAdmin, targetUserId }) => {
+    if (isAdmin) {
+      if (teamScoped && teamId != null) return { sql: 'team_id = ?', values: [teamId] };
+      const uid = targetUserId != null ? targetUserId : userId;
+      return teamScoped
+        ? { sql: 'user_id = ? AND team_id IS NULL', values: [uid] }
+        : { sql: 'user_id = ?', values: [uid] };
+    }
     if (!teamScoped) return { sql: 'user_id = ?', values: [userId] };
     return teamId != null
       ? { sql: 'team_id = ?', values: [teamId] }
       : { sql: 'user_id = ? AND team_id IS NULL', values: [userId] };
   };
+
+  // Single-row ops: an admin reaches ANY record by id (god-mode); everyone else
+  // is bound by their context scope.
+  const rowScope = (scope) => (scope.isAdmin ? { sql: '1 = 1', values: [] } : scopeClause(scope));
 
   const findAll = (scope, filters = {}) => {
     const { sql, values } = scopeClause(scope);
@@ -52,7 +65,7 @@ const modelGenerator = (tableName, fields) => {
   };
 
   const findById = (scope, id) => {
-    const { sql, values } = scopeClause(scope);
+    const { sql, values } = rowScope(scope);
     return fmt(db.prepare(
       `SELECT * FROM ${tableName} WHERE id = ? AND ${sql} AND deleted_at IS NULL`
     ).get(id, ...values));
@@ -80,7 +93,7 @@ const modelGenerator = (tableName, fields) => {
     }
     if (Object.keys(picked).length === 0) return findById(scope, id);
     const parsed = parseMoney(picked);
-    const { sql, values } = scopeClause(scope);
+    const { sql, values } = rowScope(scope);
     const sets = [...Object.keys(parsed).map((f) => `${f} = ?`), `updated_at = ${NOW}`];
     db.prepare(
       `UPDATE ${tableName} SET ${sets.join(', ')} WHERE id = ? AND ${sql} AND deleted_at IS NULL`
@@ -89,7 +102,7 @@ const modelGenerator = (tableName, fields) => {
   };
 
   const softDelete = (scope, id) => {
-    const { sql, values } = scopeClause(scope);
+    const { sql, values } = rowScope(scope);
     return db.prepare(
       `UPDATE ${tableName} SET deleted_at = ${NOW} WHERE id = ? AND ${sql} AND deleted_at IS NULL`
     ).run(id, ...values);

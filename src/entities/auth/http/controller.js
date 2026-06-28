@@ -24,7 +24,7 @@ const login = (req, res, next) => {
     // Insert session -> sign token with its id as jti -> pin expiry to the token's exp.
     const sessionId = sessions.create(user.id, req.ip, req.get('user-agent'));
     const token = jwt.sign(
-      { sub: user.id, email: user.email, jti: String(sessionId) },
+      { sub: user.id, email: user.email, role: user.role, jti: String(sessionId) },
       jwtSecret,
       { expiresIn: jwtExpiresIn },
     );

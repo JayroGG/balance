@@ -121,7 +121,13 @@ custom vault write routes (allocate/withdraw):
 
 Reads (GET) are open to all roles. Team management (rename/delete/add/remove/change-role) is
 owner-only **by role** (not `teams.user_id`), so multiple owners work. `team_members.role` now
-includes `guest`. The `modelGenerator` is unchanged — ownership is decided in the handler layer.
+includes `guest`. Ownership for team writes is decided in the handler layer (`access.js`).
+
+**Global admin (ADR-006).** `users.role` (`user|admin`) is a platform-level role carried in the JWT
+and surfaced as `req.isAdmin` / `req.context.isAdmin` by `auth.js`. An admin **overrides** team RBAC,
+membership, and ownership: `access.js` gates and the teams `requireRole` short-circuit; `resolveContext`
+grants any team and enables an admin-only `?user_id=` selector; `modelGenerator` gives admins god-mode
+single-row access by id and cross-user/team list scoping. Integrity invariants stay enforced for admins.
 
 ## Directory map
 

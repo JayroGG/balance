@@ -138,6 +138,15 @@ transactions, vaults, categories, balance:
 - **Team management** (rename, delete, add/remove member, change role) is **owner-only by
   `team_members.role`** (multiple owners supported; the creator is not privileged).
 
+### Global admin role — ADR-006
+
+Separately, `users.role` is `user` (default) or `admin`. A global **admin** is a platform super-admin
+that **overrides all of the above**: it bypasses team RBAC, team membership, and row ownership, can
+operate in any team (`?team_id=`) without joining, and can reach any user's personal data via an
+admin-only `?user_id=` selector (ignored for non-admins). The role rides in the JWT. **Integrity
+invariants are still enforced for admins** (`available ≥ 0`, vault-at-0 delete, team-delete-when-empty,
+last-owner). Admins are created via `npm run create-user -- <email> <password> admin`.
+
 ## 8. Architecture (summary)
 
 Entity pattern: each resource lives in `src/entities/<name>/` as a generated **model** (`db/model.js` via `modelGenerator`) and **routes** (`http/routes.js` via `restGenerator`), with validation and invariants in **hooks** (`http/hooks.js`). Generic CRUD generators live in `src/utils/`. Money decimal↔cents conversion is handled by the model layer (`moneyFields`). DB connection and environment config are isolated in `src/config/`. See `ARCHITECTURE.md` for the full directory map and diagrams.

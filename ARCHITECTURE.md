@@ -159,10 +159,17 @@ balance/
 │   │   └── index.js        # collects all entities
 │   ├── app.js              # express wiring (mounts entity routes + middleware)
 │   └── server.js           # boot: config → migrate → seed → listen
+├── test/
+│   ├── testSetup.js        # Jest global setup: fresh test DB per run
+│   ├── helpers/            # db (schema+wipe+seed), api (supertest+login)
+│   ├── unit-testing/       # pure-function specs (money, normalizeColor)
+│   └── integration-test/   # HTTP specs per entity (auth, teams, balance)
+├── jest.config.js          # serial suites over a shared SQLite test DB
 ├── .env.example            # committed template
+├── .env.test               # committed (no secrets; throwaway DB)
 ├── .env.stage              # gitignored
 ├── .env.prod               # gitignored
-├── data/                   # gitignored: balance.stage.db, balance.prod.db
+├── data/                   # gitignored: balance.{stage,prod,test}.db
 ├── .claude/agents/plans/   # feature plans (/plan-feature output)
 ├── PRD.md
 ├── CLAUDE.md

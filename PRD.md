@@ -31,7 +31,7 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 |---|---|
 | **Scope** | REST API only, no UI. |
 | **Stack** | Node.js + Express + `better-sqlite3`. JavaScript (CommonJS). |
-| **Tooling** | Bare minimum: manual boundary validation, no test suite, no Swagger/ESLint. |
+| **Tooling** | Bare minimum: manual boundary validation, no Swagger/ESLint. Jest + supertest suite added post-POC (ADR-007). |
 | **Environments** | Separated from day one via `dotenv` + `NODE_ENV` — `stage` and `prod`, each with its own DB file. |
 | **Auth** | Single seeded user (`user_id = 1`) now; schema + middleware designed for later DB-backed hashed auth. |
 | **Money** | Stored as **integer cents** in SQLite; API speaks **decimals** (e.g. `19.99`). Converted at the boundary. |

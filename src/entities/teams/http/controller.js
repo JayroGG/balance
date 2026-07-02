@@ -1,6 +1,7 @@
 'use strict';
 const { TeamModel } = require('../db/model');
 const members = require('../db/members');
+const { normalizeColor } = require('./hooks');
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
@@ -78,13 +79,20 @@ const changeRole = (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-// Rename the team. Owner-only, by team_members role (any owner, not just the creator).
+// Update name and/or color. Owner-only, by team_members role (any owner, not just the creator).
 const update = (req, res, next) => {
   try {
     const teamId = Number(req.params.id);
     requireRole(req, teamId, 'owner');
-    if (!req.body.name) throw httpError('Missing required field: name', 400);
-    res.json(TeamModel.rename(teamId, req.body.name));
+    const { name, color } = req.body;
+    if (name === undefined && color === undefined) {
+      throw httpError('Provide at least one field: name, color', 400);
+    }
+    if (name !== undefined && !name) throw httpError('Missing required field: name', 400);
+    const patch = {};
+    if (name !== undefined) patch.name = name;
+    if (color !== undefined) patch.color = normalizeColor(color); // null clears
+    res.json(TeamModel.updateById(teamId, patch));
   } catch (e) { next(e); }
 };
 

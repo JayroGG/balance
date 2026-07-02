@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS teams (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id    INTEGER NOT NULL REFERENCES users(id),  -- owner/creator
   name       TEXT    NOT NULL,
+  color      TEXT,                                   -- '#RRGGBB' or NULL (client default)
   created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   deleted_at TEXT

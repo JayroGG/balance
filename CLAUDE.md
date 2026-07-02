@@ -11,8 +11,9 @@ A **single-user REST API** for personal financial records: incomings, expenses, 
 - **Runtime:** Node.js (CommonJS).
 - **Framework:** Express.
 - **Database:** SQLite via `better-sqlite3` (synchronous, single-file).
-- **Config:** `dotenv` with per-environment files (`stage`, `prod`).
-- **No** TypeScript, ORM, test runner, or linter at POC stage — kept deliberately lean.
+- **Config:** `dotenv` with per-environment files (`stage`, `prod`, `test`).
+- **Tests:** Jest + supertest against the exported Express app (ADR-007) — `test/` with `unit-testing/` and `integration-test/`, serial runs over a throwaway SQLite file (`.env.test`, reset each run), real logins via `/auth/login`.
+- **No** TypeScript, ORM, or linter at POC stage — kept deliberately lean.
 
 ## Key commands
 
@@ -23,6 +24,7 @@ NODE_ENV=stage npm run migrate   # apply schema.sql
 NODE_ENV=stage npm run seed      # seed user_id=1 + default categories
 NODE_ENV=stage npm start         # boot the API
 NODE_ENV=prod  npm start         # boot against the prod DB/config
+npm test                         # Jest suite (sets NODE_ENV=test itself)
 ```
 
 ## Architecture

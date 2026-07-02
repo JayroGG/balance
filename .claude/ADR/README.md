@@ -34,3 +34,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-004](ADR-004-vault-allocation-model.md) | Vaults decoupled from transactions; amount-based allocation over a derived-balance ledger | Accepted |
 | [ADR-005](ADR-005-team-rbac.md) | Team RBAC: owner/member/guest with a two-gate (method + ownership) model | Accepted |
 | [ADR-006](ADR-006-global-admin-role.md) | Global admin role (platform super-admin) overriding team RBAC | Accepted |
+| [ADR-007](ADR-007-testing-harness.md) | Jest + supertest harness over a throwaway SQLite file | Accepted |

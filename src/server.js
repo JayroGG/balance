@@ -14,6 +14,11 @@ const app = require('./app');
 const schema = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
 db.exec(schema);
 
+// schema.sql can't ALTER existing tables; add columns introduced after first deploy.
+if (!db.prepare(`PRAGMA table_info(teams)`).all().some((c) => c.name === 'color')) {
+  db.exec(`ALTER TABLE teams ADD COLUMN color TEXT`);
+}
+
 // Idempotent seed
 db.prepare(`INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`).run();
 

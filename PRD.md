@@ -110,9 +110,9 @@ GET    /balance                 { total, available, vaults:[{id,name,balance,tar
 
 # Teams (multi-tenant context) + membership management
 GET    /teams                   list teams I belong to, each tagged with my `role`
-POST   /teams                   { name }        (any user; creator becomes first owner)
+POST   /teams                   { name, color? }  (any user; creator becomes first owner)
 GET    /teams/:id               (any member)
-PUT    /teams/:id               { name }        (owner-only; rename)
+PUT    /teams/:id               { name?, color? } (owner-only; at least one field; color: null clears)
 DELETE /teams/:id               (owner-only; blocked unless team has no active transactions/vaults)
 GET    /teams/:id/members       (any member)
 POST   /teams/:id/members       { email|user_id, role }   (owner-only; add/revive member)

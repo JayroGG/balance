@@ -27,9 +27,12 @@ const listAll = () =>
 
 // Mutations authorized by team_members role (any owner), not creator scope, so they
 // are by-id rather than user-scoped (unlike the generated update/softDelete).
-const rename = (teamId, name) => {
-  db.prepare(`UPDATE teams SET name = ?, updated_at = ${NOW} WHERE id = ? AND deleted_at IS NULL`)
-    .run(name, teamId);
+// `patch` is pre-validated by the controller (non-empty, keys ⊆ {name, color}).
+const updateById = (teamId, patch) => {
+  const sets = Object.keys(patch).map((f) => `${f} = ?`);
+  db.prepare(
+    `UPDATE teams SET ${sets.join(', ')}, updated_at = ${NOW} WHERE id = ? AND deleted_at IS NULL`
+  ).run(...Object.values(patch), teamId);
   return getById(teamId);
 };
 
@@ -38,6 +41,6 @@ const softDeleteById = (teamId) =>
 
 const TeamModel = {
   ...modelGenerator(ENTITY_NAME, fields),
-  listForMember, getById, listAll, rename, softDeleteById,
+  listForMember, getById, listAll, updateById, softDeleteById,
 };
 module.exports = { TeamModel };

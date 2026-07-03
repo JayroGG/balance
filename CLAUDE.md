@@ -36,6 +36,7 @@ npm test                         # Jest suite (sets NODE_ENV=test itself)
 - **Teams & context:** every financial table carries a nullable `team_id`. A request runs in one context, set by `?team_id=` and resolved by `middleware/resolveContext.js` into `req.context = { userId, teamId, role }` (omitted = personal, `role: null`). `team_members` records membership + role.
 - **RBAC (ADR-005):** team roles `owner | member | guest` on `team_members`. Two gates centralized in `src/lib/access.js` (`assertCanWrite`/`assertOwns`/`assertCanMutate`), called from the `restGenerator` write handlers and the vault allocate/withdraw routes: guests are read-only; members write only rows they created; owners bypass ownership. Reads are open to all roles. Team management (rename/delete/add/remove/change-role) is owner-only **by role** (not `teams.user_id`); a team deletes only when empty. Role writes funnel through `teams/db/members.js`.
 - **Global admin (ADR-006):** `users.role` (`user|admin`), carried in the JWT → `req.isAdmin`/`req.context.isAdmin` (set in `auth.js`). An admin overrides team RBAC, membership, and ownership (bypass in `access.js`, `resolveContext`, `modelGenerator`, teams `requireRole`); can target any team (`?team_id=`) and any user's personal data (admin-only `?user_id=`). Integrity invariants still apply. Create admins via `npm run create-user -- <email> <pass> admin`.
+- **Auto-capture (ADR-008):** payment notifications ingest as `captures` evidence via `POST /captures` — pipeline in `entities/captures/http/controller.js`: exact hash dedup (idempotent 200) → alias match (`source_aliases`: `card_last4`, fallback `channel_default`) → ±5 min cross-channel dedup → auto-post into the source's `target_team_id` context. Failures leave the capture `pending` (review inbox; `confirm`/`discard`) — ingest never 4xxs a well-formed capture. `payment_sources`/`source_aliases`/`captures` are user-scoped (no `resolveContext`); `transactions.source_id/capture_id/transfer_group_id` are server-set only. Ingest-scoped automation tokens: `POST /auth/tokens` (365 d, revocable, locked to `POST /captures` by an app-level guard). `/transfers` = atomic paired legs sharing a `transfer_group_id`; legs individually immutable (400).
 
 ### Vault / balance model (the core logic)
 
@@ -60,6 +61,9 @@ Allocate (`POST /vaults/:id/allocate { amount }`) moves spendable money into a v
 | `src/constants/hooks.js` | Lifecycle hook type constants. |
 | `src/utils/{modelGenerator,restGenerator}/` | Generic CRUD model + routes/handlers. |
 | `src/entities/{transactions,vaults,categories,balance}/` | Feature entities (constants, `db/`, `http/`). |
+| `src/entities/{payment-sources,source-aliases,captures}/` | Auto-capture identity + ingest pipeline (ADR-008); user-scoped, no team context. |
+| `src/entities/transfers/` | Tableless entity: atomic paired-transaction transfers between contexts. |
+| `docs/react-native-*.md` | Contract docs for the mobile client (requests in, work-done briefs out). |
 | `src/app.js` / `src/server.js` | Express wiring / boot sequence. |
 
 ## Workflow

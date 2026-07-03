@@ -69,20 +69,28 @@ const destroy = (req, res, next) => {
     ).all(req.params.group_id);
     if (legs.length === 0) throw httpError('Transfer not found', 404);
 
-    const scopes = legs.map((leg) => {
-      if (leg.team_id == null) {
-        // Someone else's personal leg is invisible — 404, not 403.
-        if (leg.user_id !== req.userId && !req.isAdmin) throw httpError('Transfer not found', 404);
-        return { userId: req.userId, teamId: null, role: null, isAdmin: req.isAdmin };
-      }
-      const role = req.isAdmin ? 'owner' : roleOf(req.userId, leg.team_id);
-      if (!role) throw httpError('Transfer not found', 404);
-      if (role === 'guest') throw httpError('Guests have read-only access', 403);
-      if (role === 'member' && leg.user_id !== req.userId) {
-        throw httpError('Members can only modify records they created', 403);
-      }
-      return { userId: req.userId, teamId: leg.team_id, role, isAdmin: req.isAdmin };
+    // Visibility first: a caller related to NO leg gets a 404 (the transfer is
+    // hidden); one who can see any leg gets capability errors (403) instead.
+    const relationOf = (leg) => {
+      if (req.isAdmin) return 'owner';
+      if (leg.team_id == null) return leg.user_id === req.userId ? 'own' : null;
+      return roleOf(req.userId, leg.team_id) || null;
+    };
+    const relations = legs.map(relationOf);
+    if (relations.every((r) => r == null)) throw httpError('Transfer not found', 404);
+
+    legs.forEach((leg, i) => {
+      const rel = relations[i];
+      if (rel === 'own' || rel === 'owner') return;
+      if (rel === 'guest') throw httpError('Guests have read-only access', 403);
+      if (rel === 'member' && leg.user_id === req.userId) return;
+      if (rel === 'member') throw httpError('Members can only modify records they created', 403);
+      throw httpError('You need write access to both contexts of this transfer', 403);
     });
+
+    const scopes = legs.map((leg, i) => ({
+      userId: req.userId, teamId: leg.team_id, role: leg.team_id == null ? null : relations[i], isAdmin: req.isAdmin,
+    }));
 
     legs.forEach((leg, i) => {
       if (leg.type === 'income' && availableCents(scopes[i]) - leg.amount < 0) {

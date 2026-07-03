@@ -10,14 +10,9 @@ if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const db = require('./config/db');
 const app = require('./app');
 
-// Idempotent migrate on every boot
-const schema = fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8');
-db.exec(schema);
-
-// schema.sql can't ALTER existing tables; add columns introduced after first deploy.
-if (!db.prepare(`PRAGMA table_info(teams)`).all().some((c) => c.name === 'color')) {
-  db.exec(`ALTER TABLE teams ADD COLUMN color TEXT`);
-}
+// Idempotent migrate on every boot — the single source of migration logic
+// (schema.sql + guarded ALTERs for post-deploy columns) lives in db/migrate.js.
+require('./db/migrate');
 
 // Idempotent seed
 db.prepare(`INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`).run();

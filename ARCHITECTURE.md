@@ -9,8 +9,13 @@ erDiagram
     users ||--o{ categories : owns
     users ||--o{ vaults : owns
     users ||--o{ transactions : owns
+    users ||--o{ payment_sources : owns
     categories ||--o{ transactions : classifies
     vaults ||--o{ vault_history : "balance ledger"
+    payment_sources ||--o{ source_aliases : "recognized by"
+    payment_sources ||--o{ captures : "resolved to"
+    captures |o--o| transactions : posts
+    captures |o--o| captures : duplicate_of
 
     users {
         int id PK
@@ -42,6 +47,9 @@ erDiagram
         int category_id FK "nullable"
         string description
         date occurred_at
+        int source_id FK "nullable — which pot paid"
+        int capture_id FK "nullable — non-null = auto-captured"
+        string transfer_group_id "nullable — pairs transfer legs"
         datetime deleted_at "nullable"
     }
     vault_history {
@@ -51,6 +59,43 @@ erDiagram
         string action "allocate|withdraw"
         int amount "cents, > 0"
         datetime created_at
+    }
+    payment_sources {
+        int id PK
+        int user_id FK
+        string name
+        string type "account|credit_card"
+        string bank "free slug"
+        int target_team_id FK "nullable — routing rule, NULL = personal"
+        int default_category_id FK "nullable"
+        int active "1|0"
+        datetime deleted_at "nullable"
+    }
+    source_aliases {
+        int id PK
+        int user_id FK
+        int source_id FK
+        string channel "google_wallet|nu_app|..."
+        string match_kind "card_last4|channel_default"
+        string value "4 digits, or NULL for channel_default"
+        datetime deleted_at "nullable"
+    }
+    captures {
+        int id PK
+        int user_id FK
+        string channel
+        string kind "purchase|transfer|unknown"
+        string direction "in|out"
+        int amount "cents, > 0"
+        string merchant_raw
+        string last4 "nullable"
+        datetime captured_at
+        string notification_hash "exact-dedup key"
+        string status "pending|posted|duplicate|discarded"
+        int source_id FK "nullable"
+        int duplicate_of FK "nullable"
+        int transaction_id FK "nullable"
+        datetime deleted_at "nullable"
     }
 ```
 
@@ -83,6 +128,33 @@ stateDiagram-v2
         available can never go below 0
     end note
 ```
+
+## Auto-capture ingest pipeline (ADR-008)
+
+A payment notification is *evidence*, not a transaction. Devices (iOS Shortcuts / MacroDroid)
+parse it into structured fields and POST to one ingest endpoint — all resolution lives server-side:
+
+```mermaid
+flowchart TD
+    A["POST /captures<br/>{channel, direction, amount, last4?, captured_at, notification_hash?}"] --> B{"1. hash seen before?<br/>(user, channel, notification_hash)"}
+    B -- yes --> B2["200 original capture<br/>(idempotent no-op)"]
+    B -- no --> C{"2. alias match?<br/>last4 -> card_last4,<br/>fallback/card-less -> channel_default"}
+    C -- no --> P["saved 'pending'<br/>-> review inbox"]
+    C -- yes --> D{"3. same source+amount+direction<br/>within ±5 min?"}
+    D -- yes --> D2["saved 'duplicate'<br/>duplicate_of = earlier capture"]
+    D -- no --> E{"4. auto-post into the source's<br/>target_team_id context"}
+    E -- ok --> E2["transaction created<br/>capture 'posted' + transaction_id"]
+    E -- "available rule / lost team access" --> P
+    P -. "confirm {source_id, team_id?, category_id?}<br/>re-runs steps 3–4" .-> D
+    P -. discard .-> X["'discarded'"]
+```
+
+Ingest **never 4xxs a well-formed capture** — automations can't handle errors; the inbox
+(`GET /captures?status=pending`) is the exception path. Ingest-scoped automation tokens
+(`POST /auth/tokens`, 365 d, revocable session rows with `scope='ingest'`) may only call
+`POST /captures` (app-level guard). Transfers are two `transactions` legs sharing a
+`transfer_group_id`, created/deleted atomically with RBAC checks on both ends; legs are
+individually immutable.
 
 ## Request lifecycle (entity pattern)
 
@@ -156,6 +228,10 @@ balance/
 │   │   ├── vaults/         # + http/controller (allocate/withdraw/history), db/history
 │   │   ├── categories/     # constants, db/{fields,model}, http/{hooks,routes}
 │   │   ├── balance/        # db/queries (aggregate), http/routes
+│   │   ├── payment-sources/# pots of money + per-source routing (ADR-008)
+│   │   ├── source-aliases/ # per-channel recognition (card_last4 / channel_default)
+│   │   ├── captures/       # ingest ledger + pipeline (http/controller) + review actions
+│   │   ├── transfers/      # no table: routes/controller over paired transactions
 │   │   └── index.js        # collects all entities
 │   ├── app.js              # express wiring (mounts entity routes + middleware)
 │   └── server.js           # boot: config → migrate → seed → listen
@@ -187,3 +263,4 @@ balance/
 - **Balances are derived** from the two ledgers (`transactions`, `vault_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults controller.
 - **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; a vault deletes only at balance 0. See ADR-004.
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
+- **Auto-capture:** `payment_sources`/`source_aliases`/`captures` are **user-scoped only** (no `resolveContext`); routing to a team comes from the source's `target_team_id`, checked as write-capable at source create/update and again at post time. Provenance columns on `transactions` are server-set only. Ingest never 4xxs a well-formed capture. See ADR-008.

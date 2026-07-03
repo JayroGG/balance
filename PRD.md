@@ -39,6 +39,8 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Vaults** | Funded by **allocating an amount** of spendable money into a vault; **withdrawing** an amount returns it to spendable. Movements are recorded in the append-only `vault_history` ledger — its source of truth. No direct spending from a vault. (Corrected in ADR-004.) |
 | **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. Computed live; `available` is a hard `≥ 0` invariant. |
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
+| **Auto-capture** | Payment notifications are *evidence*, not transactions: server-side ingest pipeline (hash dedup → alias match → ±5 min cross-channel dedup → auto-post into the source's routed context; unresolved → review inbox). Ingest never 4xxs a well-formed capture. Long-lived ingest-scoped automation tokens. (ADR-008.) |
+| **Transfers** | Moving money between contexts is one atomic operation: two `transactions` legs sharing a `transfer_group_id`; RBAC write check on both ends; legs individually immutable. (ADR-008.) |
 
 ## 5. Data Model
 
@@ -49,6 +51,10 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
 - **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference.
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
+- **payment_sources** — `id, user_id, name, type ('account'|'credit_card'), bank, target_team_id (FK, nullable — THE routing rule: where auto-captured transactions land; NULL = personal), default_category_id, active` — one row per pot of money; user-owned, never team-scoped (ADR-008).
+- **source_aliases** — `id, user_id, source_id, channel, match_kind ('card_last4'|'channel_default'), value` — how a channel's notifications identify a source; at most one active `channel_default` per `(user, channel)`.
+- **captures** — `id, user_id, channel, kind, direction ('in'|'out'), amount (cents), merchant_raw, last4, captured_at, notification_hash, status ('pending'|'posted'|'duplicate'|'discarded'), source_id, duplicate_of, transaction_id` — the ingest ledger: one row per notification evidence.
+- **transactions** additionally carries nullable provenance: `source_id`, `capture_id` (non-null = auto-captured), `transfer_group_id` (pairs the two legs of a transfer) — server-set only, never accepted from request bodies.
 
 **Invariants** (enforced in hooks/controller):
 - `amount` is always a positive integer; `type` carries the sign meaning.
@@ -119,6 +125,28 @@ POST   /teams/:id/members       { email|user_id, role }   (owner-only; add/reviv
 PUT    /teams/:id/members/:userId  { role }     (owner-only; promote/demote; can't demote last owner)
 DELETE /teams/:id/members/:userId  (owner-only; can't remove last owner)
 
+# Payment sources & aliases (auto-capture identity — user-scoped, no ?team_id=)
+GET/POST /payment-sources ; GET/PUT/DELETE /payment-sources/:id   (DELETE cascades aliases)
+GET/POST /source-aliases  ; GET/PUT/DELETE /source-aliases/:id
+
+# Captures (notification evidence -> transactions; ADR-008)
+POST   /captures                { channel, kind?, direction, amount, merchant_raw?, last4?,
+                                  captured_at, notification_hash? }
+                                201 capture (status posted|duplicate|pending);
+                                re-sent hash -> 200 original (idempotent)
+GET    /captures                ?status= &channel= &source_id=   (review inbox: status=pending)
+POST   /captures/:id/confirm    { source_id, team_id?, category_id? }  (pending only)
+POST   /captures/:id/discard    (pending only)
+DELETE /captures/:id            (soft delete)
+
+# Automation tokens (long-lived, ingest-scoped: may ONLY POST /captures)
+POST   /auth/tokens             { name } -> { id, name, token }  (token shown once, ~365 d)
+GET    /auth/tokens             ; DELETE /auth/tokens/:id  (revoke)
+
+# Transfers (atomic two-legged move between contexts; contexts from the body)
+POST   /transfers               { amount, from_team_id?, to_team_id?, description? }
+DELETE /transfers/:group_id     soft-deletes both legs (legs individually immutable -> 400)
+
 # Context switching: every financial endpoint takes an optional ?team_id=
 #   omitted -> personal (user_id = me AND team_id IS NULL)
 #   present -> that team's data (membership verified; role enforced)
@@ -156,7 +184,7 @@ Entity pattern: each resource lives in `src/entities/<name>/` as a generated **m
 - **Phase 1 — POC (current):** schema + migrate + seed; Categories, Vaults (with allocate/withdraw + history), Transactions, and Balance modules; environment separation; documentation/scaffolding.
 - **Phase 2 — Auth:** DB-backed users with hashed passwords (ADR-003), then Auth0 + RBAC as the north star (ADR-001); swap the POC auth middleware for real authentication; user-scope every query.
 - **Phase 3 — Enhancements:** multi-currency, budgets per category/period, recurring transactions, reporting/aggregation endpoints.
-- **Phase 4 — Bank/account integrations (future, post-Auth0):** import transactions automatically from a linked account/card via a banking aggregator (e.g. **Pluggy** or **Belvo** for Nubank / Open Finance Brasil — Google Wallet has no transaction-read API, so it's out). Depends on real auth being in place (per-user tokens). Needs a `connections`/`accounts` concept, an import service mapping external transactions → the `transactions` ledger, and idempotent sync (`external_id` + `source` on transactions). Aggregator choice (Pluggy vs. Belvo) is its own ADR when this starts.
+- **Phase 4 — Bank/account integrations (future, post-Auth0):** import transactions automatically from a linked account/card via a banking aggregator (e.g. **Pluggy** or **Belvo** for Nubank / Open Finance Brasil — Google Wallet has no transaction-read API, so it's out). Depends on real auth being in place (per-user tokens). Needs a `connections`/`accounts` concept, an import service mapping external transactions → the `transactions` ledger, and idempotent sync (`external_id` + `source` on transactions). Aggregator choice (Pluggy vs. Belvo) is its own ADR when this starts. **Stepping stone shipped 2026-07 (ADR-008):** the auto-capture pipeline (`payment_sources`/`source_aliases`/`captures` + `/transfers`) ingests device-parsed payment notifications; an aggregator feed later becomes just another `channel` posting into the same `POST /captures`.
 
 ## 10. Workflow & Documentation Deliverables
 

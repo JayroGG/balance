@@ -10,6 +10,10 @@ const {
   BalanceEntity,
   TeamsEntity,
   AuthEntity,
+  PaymentSourcesEntity,
+  SourceAliasesEntity,
+  CapturesEntity,
+  TransfersEntity,
 } = require('./entities');
 
 const app = express();
@@ -29,13 +33,29 @@ app.use('/auth', AuthEntity.publicRoutes);
 
 app.use(auth);
 
+// An ingest-scoped automation token may ONLY post captures — a leaked
+// phone-automation secret must not expose the rest of the account
+// (including logout/token minting, hence before the protected auth routes).
+app.use((req, res, next) => {
+  if (req.tokenScope === 'ingest' && !(req.method === 'POST' && req.path === '/captures')) {
+    return next(Object.assign(new Error('ingest-scoped token'), { status: 403 }));
+  }
+  next();
+});
+
 // Protected auth routes (logout) need a validated token.
 app.use('/auth', AuthEntity.protectedRoutes);
 
 // `context: true` mounts resolveContext so ?team_id= switches the request context.
 // Teams are managed via team_members, not context, so they opt out.
 const routes = [
-  { path: '/teams',        route: TeamsEntity.routes },
+  { path: '/teams',           route: TeamsEntity.routes },
+  // Auto-capture entities are user-scoped only (sources carry their own routing
+  // rule), so they do not mount resolveContext.
+  { path: '/payment-sources', route: PaymentSourcesEntity.routes },
+  { path: '/source-aliases',  route: SourceAliasesEntity.routes },
+  { path: '/captures',        route: CapturesEntity.routes },
+  { path: '/transfers',       route: TransfersEntity.routes }, // contexts come from the body
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
   { path: '/transactions', route: TransactionsEntity.routes, context: true },

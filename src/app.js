@@ -10,6 +10,7 @@ const {
   BalanceEntity,
   TeamsEntity,
   AuthEntity,
+  PaymentSourcesEntity,
 } = require('./entities');
 
 const app = express();
@@ -35,7 +36,10 @@ app.use('/auth', AuthEntity.protectedRoutes);
 // `context: true` mounts resolveContext so ?team_id= switches the request context.
 // Teams are managed via team_members, not context, so they opt out.
 const routes = [
-  { path: '/teams',        route: TeamsEntity.routes },
+  { path: '/teams',           route: TeamsEntity.routes },
+  // Auto-capture entities are user-scoped only (sources carry their own routing
+  // rule), so they do not mount resolveContext.
+  { path: '/payment-sources', route: PaymentSourcesEntity.routes },
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
   { path: '/transactions', route: TransactionsEntity.routes, context: true },

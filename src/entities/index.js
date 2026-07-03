@@ -5,5 +5,9 @@ const { Entity: TransactionsEntity } = require('./transactions');
 const { Entity: BalanceEntity }      = require('./balance');
 const { Entity: TeamsEntity }        = require('./teams');
 const { Entity: AuthEntity }         = require('./auth');
+const { Entity: PaymentSourcesEntity } = require('./payment-sources');
 
-module.exports = { CategoriesEntity, VaultsEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity };
+module.exports = {
+  CategoriesEntity, VaultsEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity,
+  PaymentSourcesEntity,
+};

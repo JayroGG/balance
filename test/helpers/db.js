@@ -8,11 +8,16 @@ const db = require('../../src/config/db');
 
 db.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'db', 'schema.sql'), 'utf8'));
 
-// Child → parent order (foreign_keys is ON).
-const TABLES = ['vault_history', 'transactions', 'vaults', 'categories',
-  'team_members', 'teams', 'sessions', 'users'];
+// Child → parent order (foreign_keys is ON). transactions <-> captures reference
+// each other, so FKs are suspended for the wipe — no order satisfies a cycle.
+const TABLES = ['vault_history', 'captures', 'transactions', 'source_aliases',
+  'payment_sources', 'vaults', 'categories', 'team_members', 'teams', 'sessions', 'users'];
 
-const wipeAll = () => TABLES.forEach((t) => db.prepare(`DELETE FROM ${t}`).run());
+const wipeAll = () => {
+  db.pragma('foreign_keys = OFF');
+  TABLES.forEach((t) => db.prepare(`DELETE FROM ${t}`).run());
+  db.pragma('foreign_keys = ON');
+};
 
 // Active + verified user ready to log in; returns its id. Low bcrypt cost — test speed.
 const seedUser = (email, password, role = 'user') =>

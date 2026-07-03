@@ -18,6 +18,10 @@ const assertAlias = (req, { source_id, channel, match_kind, value }, excludeId) 
   }
   if (match_kind === 'card_last4') {
     if (!/^\d{4}$/.test(value ?? '')) throw httpError('value must be exactly 4 digits', 400);
+    const dup = SourceAliasModel
+      .findAll(req.context, { channel, match_kind: 'card_last4', value })
+      .some((a) => a.id !== excludeId);
+    if (dup) throw httpError('alias already exists for this channel and card', 400);
     return;
   }
   // channel_default: card-less pushes are only unambiguous while the channel

@@ -13,6 +13,7 @@ const {
   PaymentSourcesEntity,
   SourceAliasesEntity,
   CapturesEntity,
+  TransfersEntity,
 } = require('./entities');
 
 const app = express();
@@ -54,6 +55,7 @@ const routes = [
   { path: '/payment-sources', route: PaymentSourcesEntity.routes },
   { path: '/source-aliases',  route: SourceAliasesEntity.routes },
   { path: '/captures',        route: CapturesEntity.routes },
+  { path: '/transfers',       route: TransfersEntity.routes }, // contexts come from the body
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
   { path: '/transactions', route: TransactionsEntity.routes, context: true },

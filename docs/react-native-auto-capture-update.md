@@ -1,9 +1,9 @@
-# Frontend update — Auto-capture domain model, Slice 1 (work done)
+# Frontend update — Auto-capture domain model, Slices 1 + 2 (work done)
 
-Brief for the React Native agent. Backend shipped **Slice 1** of
+Brief for the React Native agent. Backend shipped **both slices** of
 `balance-manager/docs/backend-auto-capture-request.md`: `payment_sources`, `source_aliases`,
-`captures` with the full ingest pipeline, review actions, and ingest-scoped automation tokens.
-**Slice 2 (`/transfers`) is not in this update** — this doc will be amended when it ships.
+`captures` with the full ingest pipeline, review actions, ingest-scoped automation tokens
+(Slice 1), and `/transfers` (Slice 2, §9 below).
 Auth, RBAC, `?team_id=` context, and every pre-existing endpoint are unchanged.
 
 **TL;DR**
@@ -148,3 +148,42 @@ On every boot and `npm run migrate`: new tables are created via `CREATE TABLE IF
 existing DBs get `transactions.source_id/capture_id/transfer_group_id` and
 `sessions.name/scope` via guarded `ALTER TABLE`s (`PRAGMA table_info` checks). Dev/stage DBs
 upgrade in place, no data loss.
+
+## 9. `/transfers` (Slice 2)
+
+### `POST /transfers`
+
+Body `{ amount, from_team_id?, to_team_id?, description? }` — `null`/omitted end = personal.
+
+Response `201`:
+
+```json
+{ "transfer_group_id": "6f9c…-uuid", "from": { …expense tx, "team_id": null }, "to": { …income tx, "team_id": 4 } }
+```
+
+- Atomically creates the two legs, both carrying the shared `transfer_group_id` and
+  `description` (default `"Transfer"` when omitted — client may prefer sending a localized one).
+- Guards: `amount > 0` → else `400`; `from === to` (both personal or same team) →
+  `400 { "error": "from and to contexts must differ" }`; unknown team →
+  `404 { "error": "Team not found" }`; non-member → `403`; **guest on either end** →
+  `403 { "error": "Guests have read-only access" }`; expense leg over the from-context's
+  available → `400 { "error": "Insufficient available balance: …" }`.
+
+### `DELETE /transfers/:group_id` → `204`
+
+- Soft-deletes **both** legs atomically. `404` when no live legs, or when the caller is related
+  to none of them; `403` when they can see the transfer but lack write rights on a leg
+  (guest; member deleting another's transfer). Blocked with the standard available-balance
+  `400` when removing the **income leg** would strand vaulted money in its context.
+
+### Leg immutability
+
+`PUT`/`DELETE /transactions/:id` on any row with a `transfer_group_id` →
+`400 { "error": "part of a transfer — delete the transfer instead" }`. Mirror it in the UI:
+render the pair as one transfer, no per-leg edit/delete affordances.
+
+### Slice 2 deviations
+
+None of substance: error semantics follow the house pattern (`404` hides what you can't see,
+`403` denies what you can see), and the income-leg vault guard rejects the whole delete, as
+requested. Suite: `test/integration-test/transfers/transfers.test.js` (7 scenarios).

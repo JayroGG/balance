@@ -26,6 +26,14 @@ const assertSpendable = (scope, deltaCents) => {
   }
 };
 
+// Transfer legs are immutable individually — only DELETE /transfers/:group_id
+// (which bypasses these REST handlers) may remove them, always in pairs.
+const assertNotTransferLeg = (row) => {
+  if (row.transfer_group_id) {
+    const e = new Error('part of a transfer — delete the transfer instead'); e.status = 400; throw e;
+  }
+};
+
 const transactionHooks = ({ type, body, previous, record, req }) => {
   switch (type) {
     case BEFORE_CREATE: {
@@ -37,6 +45,7 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
     }
 
     case BEFORE_UPDATE: {
+      assertNotTransferLeg(previous);
       const resolvedType = body.type !== undefined ? body.type : previous.type;
       assertType(resolvedType);
       const oldContribution = contribution(previous.type, toCents(previous.amount));
@@ -47,6 +56,7 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
     }
 
     case BEFORE_DESTROY: {
+      assertNotTransferLeg(record);
       assertSpendable(req.context, -contribution(record.type, toCents(record.amount)));
       return;
     }

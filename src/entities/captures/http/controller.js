@@ -119,4 +119,47 @@ const ingest = (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-module.exports = { ingest };
+// Review actions: only the caller's own still-pending captures qualify.
+const requirePending = (userId, id) => {
+  const capture = CaptureModel.findById({ userId }, Number(id));
+  if (!capture || capture.status !== 'pending') throw httpError('Capture not found', 404);
+  return capture;
+};
+
+// The inbox's "link to a source" action: attach the source the user picked,
+// then run the same steps 3–4 as ingest. Optional overrides beat the source's
+// defaults. Unlike ingest, a bad override is an interactive 400.
+const confirm = (req, res, next) => {
+  try {
+    const userId = req.userId;
+    const capture = requirePending(userId, req.params.id);
+    const { source_id, team_id, category_id } = req.body;
+
+    if (!source_id) throw httpError('Missing required field: source_id', 400);
+    if (!PaymentSourceModel.findById({ userId }, source_id)) {
+      throw httpError('source_id must be one of your payment sources', 400);
+    }
+    if (team_id !== undefined && team_id !== null) {
+      const role = teamExists(team_id) ? roleOf(userId, team_id) : undefined;
+      if (role !== 'owner' && role !== 'member') {
+        throw httpError('team must be one you can write to', 400);
+      }
+    }
+
+    CaptureModel.setSource(capture.id, source_id);
+    const overrides = {};
+    if (team_id !== undefined) overrides.team_id = team_id;
+    if (category_id !== undefined) overrides.category_id = category_id;
+    res.json(resolveAndPost(userId, capture.id, overrides));
+  } catch (e) { next(e); }
+};
+
+const discard = (req, res, next) => {
+  try {
+    const capture = requirePending(req.userId, req.params.id);
+    CaptureModel.setStatus(capture.id, 'discarded');
+    res.json(CaptureModel.findById({ userId: req.userId }, capture.id));
+  } catch (e) { next(e); }
+};
+
+module.exports = { ingest, confirm, discard };

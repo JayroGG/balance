@@ -12,6 +12,7 @@ const {
   AuthEntity,
   PaymentSourcesEntity,
   SourceAliasesEntity,
+  CapturesEntity,
 } = require('./entities');
 
 const app = express();
@@ -42,6 +43,7 @@ const routes = [
   // rule), so they do not mount resolveContext.
   { path: '/payment-sources', route: PaymentSourcesEntity.routes },
   { path: '/source-aliases',  route: SourceAliasesEntity.routes },
+  { path: '/captures',        route: CapturesEntity.routes },
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
   { path: '/transactions', route: TransactionsEntity.routes, context: true },

@@ -7,8 +7,9 @@ const { Entity: TeamsEntity }        = require('./teams');
 const { Entity: AuthEntity }         = require('./auth');
 const { Entity: PaymentSourcesEntity } = require('./payment-sources');
 const { Entity: SourceAliasesEntity }  = require('./source-aliases');
+const { Entity: CapturesEntity }       = require('./captures');
 
 module.exports = {
   CategoriesEntity, VaultsEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity,
-  PaymentSourcesEntity, SourceAliasesEntity,
+  PaymentSourcesEntity, SourceAliasesEntity, CapturesEntity,
 };

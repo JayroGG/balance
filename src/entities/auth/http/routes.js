@@ -9,5 +9,9 @@ publicRoutes.post('/login', ctrl.login);
 
 const protectedRoutes = Router();
 protectedRoutes.post('/logout', ctrl.logout);
+// Automation tokens (ingest-scoped, long-lived, revocable).
+protectedRoutes.post('/tokens', ctrl.createToken);
+protectedRoutes.get('/tokens', ctrl.listTokens);
+protectedRoutes.delete('/tokens/:id', ctrl.revokeToken);
 
 module.exports = { publicRoutes, protectedRoutes };

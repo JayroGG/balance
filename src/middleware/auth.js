@@ -33,7 +33,7 @@ module.exports = (req, res, next) => {
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (!token) throw unauthorized();
 
-    const { sub, jti, role } = jwt.verify(token, jwtSecret); // throws on bad sig / expiry
+    const { sub, jti, role, scope } = jwt.verify(token, jwtSecret); // throws on bad sig / expiry
     const session = sessions.findById(Number(jti));
 
     // Token proves who; the session row proves still-allowed (real logout).
@@ -42,6 +42,7 @@ module.exports = (req, res, next) => {
     }
 
     setIdentity(req, sub, session.id, role);
+    req.tokenScope = scope || null; // 'ingest' = automation token (app-level guard)
     next();
   } catch (e) {
     next(e.status ? e : unauthorized()); // jwt errors -> 401

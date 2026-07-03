@@ -32,6 +32,16 @@ app.use('/auth', AuthEntity.publicRoutes);
 
 app.use(auth);
 
+// An ingest-scoped automation token may ONLY post captures — a leaked
+// phone-automation secret must not expose the rest of the account
+// (including logout/token minting, hence before the protected auth routes).
+app.use((req, res, next) => {
+  if (req.tokenScope === 'ingest' && !(req.method === 'POST' && req.path === '/captures')) {
+    return next(Object.assign(new Error('ingest-scoped token'), { status: 403 }));
+  }
+  next();
+});
+
 // Protected auth routes (logout) need a validated token.
 app.use('/auth', AuthEntity.protectedRoutes);
 

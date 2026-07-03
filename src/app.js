@@ -11,6 +11,7 @@ const {
   TeamsEntity,
   AuthEntity,
   PaymentSourcesEntity,
+  SourceAliasesEntity,
 } = require('./entities');
 
 const app = express();
@@ -40,6 +41,7 @@ const routes = [
   // Auto-capture entities are user-scoped only (sources carry their own routing
   // rule), so they do not mount resolveContext.
   { path: '/payment-sources', route: PaymentSourcesEntity.routes },
+  { path: '/source-aliases',  route: SourceAliasesEntity.routes },
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
   { path: '/transactions', route: TransactionsEntity.routes, context: true },

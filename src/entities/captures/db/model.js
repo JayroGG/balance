@@ -17,15 +17,16 @@ const findByHash = (userId, channel, hash) =>
   ).get(userId, channel, hash));
 
 // Cross-channel dedup: a live capture of the same payment (same source, amount,
-// direction) reported within ±windowMinutes of capturedAtISO.
-const findRecentMatch = (userId, sourceId, amountCents, direction, capturedAtISO, windowMinutes) =>
+// direction) reported within ±windowMinutes of capturedAtISO. excludeId keeps a
+// capture from matching itself once inserted.
+const findRecentMatch = (userId, sourceId, amountCents, direction, capturedAtISO, windowMinutes, excludeId) =>
   fmt(db.prepare(
     `SELECT * FROM captures
-      WHERE user_id = ? AND source_id = ? AND amount = ? AND direction = ?
+      WHERE user_id = ? AND source_id = ? AND amount = ? AND direction = ? AND id != ?
         AND status NOT IN ('duplicate', 'discarded') AND deleted_at IS NULL
         AND ABS(julianday(captured_at) - julianday(?)) * 1440 <= ?
       ORDER BY id LIMIT 1`
-  ).get(userId, sourceId, amountCents, direction, capturedAtISO, windowMinutes));
+  ).get(userId, sourceId, amountCents, direction, excludeId ?? -1, capturedAtISO, windowMinutes));
 
 // Pipeline insert: unlike the public create, the pipeline controls status,
 // source_id, duplicate_of and transaction_id. amount arrives already in cents.
@@ -42,6 +43,14 @@ const insert = (userId, data) => {
 const setStatus = (id, status) =>
   db.prepare(`UPDATE captures SET status = ?, updated_at = ${NOW} WHERE id = ?`).run(status, id);
 
+const setSource = (id, sourceId) =>
+  db.prepare(`UPDATE captures SET source_id = ?, updated_at = ${NOW} WHERE id = ?`).run(sourceId, id);
+
+const setDuplicate = (id, ofId) =>
+  db.prepare(
+    `UPDATE captures SET status = 'duplicate', duplicate_of = ?, updated_at = ${NOW} WHERE id = ?`
+  ).run(ofId, id);
+
 const setPosted = (id, sourceId, transactionId) =>
   db.prepare(
     `UPDATE captures SET status = 'posted', source_id = ?, transaction_id = ?, updated_at = ${NOW}
@@ -54,6 +63,8 @@ const CaptureModel = {
   findRecentMatch,
   insert,
   setStatus,
+  setSource,
+  setDuplicate,
   setPosted,
 };
 

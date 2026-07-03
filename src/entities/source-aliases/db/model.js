@@ -5,20 +5,25 @@ const { fields } = require('./fields');
 const { ENTITY_NAME } = require('../constants');
 
 // Resolve a capture's identity evidence to a source id (the ingest pipeline's
-// alias-match step). last4 present -> card_last4 alias; absent -> channel_default.
+// alias-match step). last4 -> card_last4 alias first; a miss (or no last4)
+// falls back to the channel's channel_default — a channel with a default maps
+// to a single pot, so even an unregistered last4 from it is unambiguous
+// (acceptance scenario #3: bank re-report with last4 over a default-only channel).
 const resolveSourceId = (userId, channel, last4) => {
-  const row = last4
-    ? db.prepare(
-        `SELECT source_id FROM source_aliases
-          WHERE user_id = ? AND channel = ? AND match_kind = 'card_last4' AND value = ?
-            AND deleted_at IS NULL`
-      ).get(userId, channel, last4)
-    : db.prepare(
-        `SELECT source_id FROM source_aliases
-          WHERE user_id = ? AND channel = ? AND match_kind = 'channel_default'
-            AND deleted_at IS NULL`
-      ).get(userId, channel);
-  return row ? row.source_id : null;
+  if (last4) {
+    const byCard = db.prepare(
+      `SELECT source_id FROM source_aliases
+        WHERE user_id = ? AND channel = ? AND match_kind = 'card_last4' AND value = ?
+          AND deleted_at IS NULL`
+    ).get(userId, channel, last4);
+    if (byCard) return byCard.source_id;
+  }
+  const byDefault = db.prepare(
+    `SELECT source_id FROM source_aliases
+      WHERE user_id = ? AND channel = ? AND match_kind = 'channel_default'
+        AND deleted_at IS NULL`
+  ).get(userId, channel);
+  return byDefault ? byDefault.source_id : null;
 };
 
 // Cascade for payment-sources DESTROY: a source's aliases go with it.

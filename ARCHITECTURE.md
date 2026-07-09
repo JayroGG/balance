@@ -11,6 +11,10 @@ erDiagram
     users ||--o{ transactions : owns
     categories ||--o{ transactions : classifies
     vaults ||--o{ vault_history : "balance ledger"
+    users ||--o{ shopping_lists : owns
+    shopping_lists ||--o{ shopping_list_items : contains
+    shopping_lists |o--o| transactions : "booked at checkout"
+    categories ||--o{ shopping_lists : "default at checkout"
 
     users {
         int id PK
@@ -52,12 +56,33 @@ erDiagram
         int amount "cents, > 0"
         datetime created_at
     }
+    shopping_lists {
+        int id PK
+        int user_id FK
+        int team_id FK "nullable = personal"
+        string name
+        string status "open|purchased (server-owned)"
+        int category_id FK "nullable, default at checkout"
+        int transaction_id FK "nullable, set by checkout"
+        datetime deleted_at "nullable"
+    }
+    shopping_list_items {
+        int id PK
+        int user_id FK "inherited from list"
+        int list_id FK
+        string name
+        real qty "> 0"
+        int price "cents, nullable, per-unit estimate"
+        int checked "0|1"
+        datetime deleted_at "nullable"
+    }
 ```
 
 **Notes**
 - All amounts are integer **cents**. API converts to/from decimals at the boundary.
 - All tables soft-delete via nullable `deleted_at` (`NULL` = active). Every read filters `deleted_at IS NULL`.
 - `transactions` is a **pure ledger** — no vault reference. `vault_history` is the **append-only source of truth** for vault balances (`balance = Σallocate − Σwithdraw`). See ADR-004.
+- `shopping_list_items` is keyed by `list_id`, **not** user/team-scoped: a shared list must show every member's items. Access is authorized by resolving the parent list in `req.context`. See ADR-008.
 
 ## Balance calculation flow
 
@@ -82,6 +107,45 @@ stateDiagram-v2
         excluded from available (spendable)
         available can never go below 0
     end note
+```
+
+## Shopping list checkout (ADR-008)
+
+A list is a plan, not money: it touches no balance figure until checkout, which books **one**
+expense for the whole list and freezes the list as history.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: POST /shopping-lists
+    Open --> Open: add / check / edit items
+    Open --> Purchased: POST /:id/checkout { amount }
+    Purchased --> [*]: frozen (no edits, no re-checkout)
+    note right of Open
+        no transaction exists yet
+        item price = per-unit estimate
+        total, available unchanged
+    end note
+    note right of Purchased
+        transaction_id links the booked expense
+        soft-delete cascades to items,
+        but never touches the transaction
+    end note
+```
+
+Checkout is the only writer of `status`/`transaction_id`, and it reuses the transactions
+`BEFORE_CREATE` hook rather than reimplementing the `available ≥ 0` guard:
+
+```mermaid
+flowchart TD
+    A["POST /shopping-lists/:id/checkout"] --> B["load list in req.context<br/>404 if not visible"]
+    B --> C["assertCanMutate<br/>(guest denied; member owns)"]
+    C --> D{"open? ≥1 checked item?<br/>amount > 0?"}
+    D -- no --> X["400"]
+    D -- yes --> E["txScope = list's OWN context<br/>(userId, teamId), not the caller's"]
+    E --> F["transactionHooks BEFORE_CREATE<br/>available ≥ 0 guard — before any write"]
+    F -- breach --> X
+    F -- ok --> G["db.transaction: create expense<br/>+ markPurchased(transaction_id)"]
+    G --> H["200 — purchased list"]
 ```
 
 ## Request lifecycle (entity pattern)
@@ -156,6 +220,8 @@ balance/
 │   │   ├── vaults/         # + http/controller (allocate/withdraw/history), db/history
 │   │   ├── categories/     # constants, db/{fields,model}, http/{hooks,routes}
 │   │   ├── balance/        # db/queries (aggregate), http/routes
+│   │   ├── shopping-lists/ # + http/controller (checkout → books one expense)
+│   │   ├── shopping-list-items/  # hand-written model: list-keyed, not user-scoped
 │   │   └── index.js        # collects all entities
 │   ├── app.js              # express wiring (mounts entity routes + middleware)
 │   └── server.js           # boot: config → migrate → seed → listen
@@ -187,3 +253,4 @@ balance/
 - **Balances are derived** from the two ledgers (`transactions`, `vault_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults controller.
 - **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; a vault deletes only at balance 0. See ADR-004.
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
+- **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard. See ADR-008.

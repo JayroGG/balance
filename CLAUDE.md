@@ -37,6 +37,8 @@ npm test                         # Jest suite (sets NODE_ENV=test itself)
 - **RBAC (ADR-005):** team roles `owner | member | guest` on `team_members`. Two gates centralized in `src/lib/access.js` (`assertCanWrite`/`assertOwns`/`assertCanMutate`), called from the `restGenerator` write handlers and the vault allocate/withdraw routes: guests are read-only; members write only rows they created; owners bypass ownership. Reads are open to all roles. Team management (rename/delete/add/remove/change-role) is owner-only **by role** (not `teams.user_id`); a team deletes only when empty. Role writes funnel through `teams/db/members.js`.
 - **Global admin (ADR-006):** `users.role` (`user|admin`), carried in the JWT → `req.isAdmin`/`req.context.isAdmin` (set in `auth.js`). An admin overrides team RBAC, membership, and ownership (bypass in `access.js`, `resolveContext`, `modelGenerator`, teams `requireRole`); can target any team (`?team_id=`) and any user's personal data (admin-only `?user_id=`). Integrity invariants still apply. Create admins via `npm run create-user -- <email> <pass> admin`.
 
+- **Shopping lists (ADR-008):** pre-expense checklists that stay **out of the ledger** until checkout. `shopping_lists` is context-scoped like transactions; `shopping_list_items` is scoped by its **parent list** (hand-written model, not `modelGenerator`) so a shared list shows every member's items — item hooks resolve the list via `req.context` and `404` if it isn't visible. `POST /shopping-lists/:id/checkout { amount }` books **one expense** into the list's own context, links it, and freezes the list (`status: 'purchased'` — no further edits, no re-checkout). It **reuses** the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard before any write, then commits the expense + freeze in one `db.transaction`. Item `price` is a per-unit estimate; the checkout `amount` is authoritative. Deleting a list cascades to items and leaves the transaction intact.
+
 ### Vault / balance model (the core logic)
 
 Vaults are logical allocations within one balance, not separate accounts. Transactions are a **pure ledger**; allocation is a **separate, amount-based** operation. Balances are **derived live** from two ledgers — never stored (see ADR-004). Cent-level helpers live in `entities/balance/db/queries.js`.
@@ -60,6 +62,7 @@ Allocate (`POST /vaults/:id/allocate { amount }`) moves spendable money into a v
 | `src/constants/hooks.js` | Lifecycle hook type constants. |
 | `src/utils/{modelGenerator,restGenerator}/` | Generic CRUD model + routes/handlers. |
 | `src/entities/{transactions,vaults,categories,balance}/` | Feature entities (constants, `db/`, `http/`). |
+| `src/entities/{shopping-lists,shopping-list-items}/` | Checklists + checkout controller (books one expense). |
 | `src/app.js` / `src/server.js` | Express wiring / boot sequence. |
 
 ## Workflow

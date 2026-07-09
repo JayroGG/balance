@@ -98,3 +98,35 @@ CREATE TABLE IF NOT EXISTS vault_history (
   created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_vault_history_vault ON vault_history(vault_id);
+
+-- Pre-expense checklists. Context-scoped like transactions (team_id + ?team_id=).
+-- Checkout books one expense transaction (transaction_id) and freezes status -> 'purchased'.
+CREATE TABLE IF NOT EXISTS shopping_lists (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id        INTEGER NOT NULL REFERENCES users(id),
+  team_id        INTEGER REFERENCES teams(id),          -- NULL = personal (standard context scoping)
+  name           TEXT    NOT NULL,
+  status         TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'purchased')),
+  category_id    INTEGER REFERENCES categories(id),     -- default category for checkout (nullable)
+  transaction_id INTEGER REFERENCES transactions(id),   -- set by checkout, else NULL
+  created_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  deleted_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shopping_lists_user ON shopping_lists(user_id);
+CREATE INDEX IF NOT EXISTS idx_shopping_lists_team ON shopping_lists(team_id);
+
+-- Checklist rows. Flat, listed via ?list_id=; authorized through the parent list.
+CREATE TABLE IF NOT EXISTS shopping_list_items (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  list_id    INTEGER NOT NULL REFERENCES shopping_lists(id),
+  name       TEXT    NOT NULL,
+  qty        REAL    NOT NULL DEFAULT 1,
+  price      INTEGER,                                    -- cents (moneyFields); optional per-UNIT estimate
+  checked    INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list ON shopping_list_items(list_id);

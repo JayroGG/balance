@@ -35,3 +35,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-005](ADR-005-team-rbac.md) | Team RBAC: owner/member/guest with a two-gate (method + ownership) model | Accepted |
 | [ADR-006](ADR-006-global-admin-role.md) | Global admin role (platform super-admin) overriding team RBAC | Accepted |
 | [ADR-007](ADR-007-testing-harness.md) | Jest + supertest harness over a throwaway SQLite file | Accepted |
+| [ADR-008](ADR-008-shopping-lists-checkout.md) | Shopping lists: a pre-expense checklist that books one expense at checkout | Accepted |

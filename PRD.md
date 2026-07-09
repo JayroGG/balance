@@ -39,6 +39,7 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Vaults** | Funded by **allocating an amount** of spendable money into a vault; **withdrawing** an amount returns it to spendable. Movements are recorded in the append-only `vault_history` ledger — its source of truth. No direct spending from a vault. (Corrected in ADR-004.) |
 | **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. Computed live; `available` is a hard `≥ 0` invariant. |
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
+| **Shopping lists** | Pre-expense checklists, kept **out of the ledger** until checkout books a single expense transaction for the whole list. Item prices are per-unit *estimates*; the checkout `amount` is authoritative. (ADR-008.) |
 
 ## 5. Data Model
 
@@ -49,11 +50,14 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
 - **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference.
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
+- **shopping_lists** — `id, user_id, team_id (nullable), name, status ('open'|'purchased'), category_id (FK, nullable), transaction_id (FK, nullable), …` — a pre-expense checklist. `status` and `transaction_id` are **server-owned** (set only by checkout).
+- **shopping_list_items** — `id, user_id, list_id (FK), name, qty (real, > 0), price (cents, nullable), checked, …` — checklist rows, scoped by their **parent list** rather than by user/team. `price` is a per-**unit** estimate.
 
 **Invariants** (enforced in hooks/controller):
 - `amount` is always a positive integer; `type` carries the sign meaning.
 - `available ≥ 0` at all times — money in a vault is untouchable; any write that would push it negative is rejected `400` (see §6).
 - A vault may only be deleted when its balance is `0` (withdraw it to zero first).
+- A `purchased` shopping list is frozen history: no edits to it or its items, and no second checkout (`400`).
 
 See `ARCHITECTURE.md` for the Mermaid ER diagram.
 
@@ -86,6 +90,18 @@ Worked example:
 
 **Derived, not stored:** balances are always computed from the two ledgers (`transactions`, `vault_history`); there is no materialized balance. A SQLite VIEW is the only sanctioned read-side convenience if ever needed (still derived, zero drift). See ADR-004 for the rationale.
 
+## 6b. Shopping Lists (ADR-008)
+
+A **shopping list** is a checklist you build *before* spending: name it, add items, tick off what you actually bought, then **check out**. Checkout books **one expense transaction** for the whole list, links it (`transaction_id`), and freezes the list as `purchased` history.
+
+Planned items are **not** money that moved — a list costs nothing and touches no balance figure until checkout. This keeps `transactions` a faithful record of real charges.
+
+- **Scoping.** A list is context-scoped like transactions (`?team_id=` → personal or team). Its **items are scoped by the list**, not by user/team, so on a shared team list everyone sees everyone's items. Item access is authorized by resolving the parent list in the caller's context first — an unreachable list yields `404` before any item row is touched.
+- **Checkout** (`POST /shopping-lists/:id/checkout { amount, category_id?, occurred_at? }`) requires at least one **checked** item and a positive `amount`. Item `price` is a per-unit **estimate**; the client sends the real total (the receipt is authoritative). Category resolves `body.category_id ?? list.category_id ?? none`. The expense is booked into the **list's own context**, not the caller's active one.
+- **The `available ≥ 0` invariant is reused, not reimplemented:** checkout runs the transactions `BEFORE_CREATE` hook before any write, so a checkout that would overdraw spendable money is rejected `400` and books nothing. The expense insert and the list freeze are one atomic DB transaction.
+- **Freezing & deletion.** A purchased list rejects renames, category edits, item writes, and a second checkout (`400`). Soft-deleting a list cascades a soft delete to its items and **leaves the linked transaction intact** — the money was really spent.
+- **RBAC** is inherited (ADR-005/006): guest read-only, member mutates only lists they created, owner/admin bypass.
+
 ## 7. API Surface
 
 ```
@@ -107,6 +123,18 @@ POST   /vaults/:id/withdraw      { amount }      (≤ vault balance)
 
 # Balance (aggregate business logic)
 GET    /balance                 { total, available, vaults:[{id,name,balance,target?}], currency }
+
+# Shopping lists (CRUD + soft delete) + checkout            (ADR-008)
+GET    /shopping-lists          ?status=open|purchased
+POST   /shopping-lists          { name, category_id? }
+GET/PUT/DELETE /shopping-lists/:id     (PUT/DELETE blocked once purchased; DELETE cascades to items)
+POST   /shopping-lists/:id/checkout    { amount, category_id?, occurred_at? }
+                                       (≥ 1 checked item; books one expense; freezes the list)
+
+# Shopping list items (CRUD + soft delete) — authorized through the parent list
+GET    /shopping-list-items     ?list_id=   (required)
+POST   /shopping-list-items     { list_id, name, qty?, price?, checked? }
+PUT/DELETE /shopping-list-items/:id
 
 # Teams (multi-tenant context) + membership management
 GET    /teams                   list teams I belong to, each tagged with my `role`

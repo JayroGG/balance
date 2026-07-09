@@ -66,7 +66,25 @@ POST   /vaults/:id/withdraw      { amount }      (≤ vault balance)
 
 # Balance
 GET    /balance                  { total, available, vaults:[{id,name,balance,target?}], currency }
+
+# Shopping lists (CRUD + soft delete) + checkout
+GET/POST /shopping-lists ; GET/PUT/DELETE /shopping-lists/:id   (frozen once purchased)
+POST   /shopping-lists/:id/checkout  { amount, category_id?, occurred_at? }
+
+# Shopping list items — listed through their parent list
+GET    /shopping-list-items      ?list_id=   (required)
+POST   /shopping-list-items      { list_id, name, qty?, price?, checked? }
+PUT/DELETE /shopping-list-items/:id
 ```
+
+## Shopping lists
+
+A checklist you fill *before* spending. Items carry an optional per-unit **price estimate**; nothing
+touches your balance until you **check out**, which books a single expense transaction for the whole
+list (you send the real total), links it, and freezes the list as `purchased` history. A checkout
+that would push `available` below zero is rejected `400` and books nothing. Deleting a list removes
+its items but keeps the transaction — the money was really spent. See
+[`.claude/ADR/ADR-008-shopping-lists-checkout.md`](./.claude/ADR/ADR-008-shopping-lists-checkout.md).
 
 ## Deployment (Fly.io)
 

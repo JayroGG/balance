@@ -40,6 +40,7 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. Computed live; `available` is a hard `≥ 0` invariant. |
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
 | **Shopping lists** | Pre-expense checklists, kept **out of the ledger** until checkout books a single expense transaction for the whole list. Item prices are per-unit *estimates*; the checkout `amount` is authoritative. (ADR-008.) |
+| **Activity events** | Every successful mutation appends to an **append-only `events` ledger**; `GET /events` serves a polled, context-scoped feed. Remote push (Expo) is the recorded north star delivery channel. (ADR-009.) |
 
 ## 5. Data Model
 
@@ -52,6 +53,7 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
 - **shopping_lists** — `id, user_id, team_id (nullable), name, status ('open'|'purchased'), category_id (FK, nullable), transaction_id (FK, nullable), …` — a pre-expense checklist. `status` and `transaction_id` are **server-owned** (set only by checkout).
 - **shopping_list_items** — `id, user_id, list_id (FK), name, qty (real, > 0), price (cents, nullable), checked, …` — checklist rows, scoped by their **parent list** rather than by user/team. `price` is a per-**unit** estimate.
+- **events** — `id, user_id (actor), team_id (nullable), entity, entity_id, action, summary (JSON, decimal amounts), created_at` — **append-only activity ledger** (immutable: no updates, no soft deletes); source of truth for the `/events` feed.
 
 **Invariants** (enforced in hooks/controller):
 - `amount` is always a positive integer; `type` carries the sign meaning.
@@ -102,6 +104,30 @@ Planned items are **not** money that moved — a list costs nothing and touches 
 - **Freezing & deletion.** A purchased list rejects renames, category edits, item writes, and a second checkout (`400`). Soft-deleting a list cascades a soft delete to its items and **leaves the linked transaction intact** — the money was really spent.
 - **RBAC** is inherited (ADR-005/006): guest read-only, member mutates only lists they created, owner/admin bypass.
 
+## 6c. Activity Events (ADR-009)
+
+Every meaningful successful mutation is recorded in an **append-only `events` ledger** — who
+(actor), where (context), what (`entity`/`entity_id`/`action`), plus a JSON `summary` snapshot for
+display (amounts as **decimals**). Events are immutable: never updated, never soft-deleted, and
+`/events` has no write routes.
+
+- **Emission.** Generated CRUD logs from the **after-hooks** (`CREATE`/`UPDATE`/`DESTROY`), so only
+  writes that landed are recorded; custom flows log in their controllers (vault allocate/withdraw,
+  list checkout, team management). The checkout event rides the same `db.transaction` as the
+  expense + freeze — a rejected checkout logs nothing.
+- **Scoping.** `team_id` comes from the **affected record's** context, not the caller's active one;
+  `user_id` is always the human actor (admins act as themselves). The feed is context-scoped like
+  transactions: personal = your own actions; `?team_id=` = every member's actions in that team.
+  Reads are open to all roles (guests included); non-members get `403`.
+- **Feed.** Newest first; `entity`/`action` equality filters; `since_id` (only `id >`) and `limit`
+  (default 50, max 200) for incremental polling and unread badges; `actor_email` joined in.
+- **Catalog.** transactions created/updated/deleted · vaults created/deleted/allocated/withdrawn ·
+  shopping lists created/checked_out/deleted · items created/updated/deleted (carry the parent
+  list's context) · team updated/member_added/member_removed/role_changed. Deliberately unlogged:
+  categories, vault/list renames, team create/delete.
+- **North star:** remote push (Expo Push Service) delivering these same events while the app is
+  closed — blocked only on a paid Apple Developer membership; the ledger/feed need no changes.
+
 ## 7. API Surface
 
 ```
@@ -135,6 +161,11 @@ POST   /shopping-lists/:id/checkout    { amount, category_id?, occurred_at? }
 GET    /shopping-list-items     ?list_id=   (required)
 POST   /shopping-list-items     { list_id, name, qty?, price?, checked? }
 PUT/DELETE /shopping-list-items/:id
+
+# Activity events (read-only, append-only ledger)             (ADR-009)
+GET    /events                  ?entity= &action= &since_id= &limit=
+                                (newest first; limit default 50, max 200;
+                                 personal = own actions, ?team_id= = all members' actions)
 
 # Teams (multi-tenant context) + membership management
 GET    /teams                   list teams I belong to, each tagged with my `role`

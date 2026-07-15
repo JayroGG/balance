@@ -36,3 +36,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-006](ADR-006-global-admin-role.md) | Global admin role (platform super-admin) overriding team RBAC | Accepted |
 | [ADR-007](ADR-007-testing-harness.md) | Jest + supertest harness over a throwaway SQLite file | Accepted |
 | [ADR-008](ADR-008-shopping-lists-checkout.md) | Shopping lists: a pre-expense checklist that books one expense at checkout | Accepted |
+| [ADR-009](ADR-009-activity-events-ledger.md) | Activity events ledger: a polled feed now, remote push as a delivery channel later | Accepted |

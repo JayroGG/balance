@@ -5,6 +5,7 @@ const { toCents, toDecimal } = require('../../../lib/money');
 // Import balance queries directly to avoid circular index deps
 const { availableCents, vaultBalanceCents } = require('../../balance/db/queries');
 const { assertCanMutate } = require('../../../lib/access');
+const { EventModel } = require('../../events/db/model');
 
 // Vault record + its derived balance (the shape the mobile client consumes).
 const vaultView = (scope, vault) => ({
@@ -49,6 +50,9 @@ const allocate = (req, res, next) => {
     }
 
     history.add(req.userId, vaultId, 'allocate', amountCents); // actor = req.userId
+    EventModel.log({ userId: req.userId, teamId: vault.team_id ?? null,
+      entity: 'vault', entityId: vaultId, action: 'allocated',
+      summary: { name: vault.name, amount: toDecimal(amountCents) } });
     res.json(vaultView(req.context, vault));
   } catch (e) { next(e); }
 };
@@ -66,6 +70,9 @@ const withdraw = (req, res, next) => {
     }
 
     history.add(req.userId, vaultId, 'withdraw', amountCents); // actor = req.userId
+    EventModel.log({ userId: req.userId, teamId: vault.team_id ?? null,
+      entity: 'vault', entityId: vaultId, action: 'withdrawn',
+      summary: { name: vault.name, amount: toDecimal(amountCents) } });
     res.json(vaultView(req.context, vault));
   } catch (e) { next(e); }
 };

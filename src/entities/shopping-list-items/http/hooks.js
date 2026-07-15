@@ -1,10 +1,13 @@
 'use strict';
-const { BEFORE_CREATE, BEFORE_UPDATE, BEFORE_DESTROY, GET_ONE, LIST_ALL } = require('../../../constants/hooks');
+const { BEFORE_CREATE, CREATE, BEFORE_UPDATE, UPDATE, BEFORE_DESTROY, DESTROY, GET_ONE, LIST_ALL } = require('../../../constants/hooks');
 const { assertCanMutate } = require('../../../lib/access');
 // Direct import (never via entity index) to avoid circular deps.
 const { ShoppingListModel } = require('../../shopping-lists/db/model');
+const { EventModel } = require('../../events/db/model');
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
+
+const EVENT_ACTIONS = { [CREATE]: 'created', [UPDATE]: 'updated', [DESTROY]: 'deleted' };
 
 // Resolve the parent list within the caller's context (team membership + admin
 // handled by the model). Throws 404 if the list isn't visible in this context —
@@ -66,6 +69,17 @@ const shoppingListItemHooks = ({ type, body, previous, record, req }) => {
       const list = requireList(req, record.list_id);
       assertCanMutate(req.context, list);
       assertOpen(list);
+      return;
+    }
+
+    // Items carry no team_id — the parent list's context owns the event.
+    case CREATE:
+    case UPDATE:
+    case DESTROY: {
+      const list = ShoppingListModel.findById(req.context, record.list_id);
+      EventModel.log({ userId: req.userId, teamId: list.team_id ?? null,
+        entity: 'shopping_list_item', entityId: record.id, action: EVENT_ACTIONS[type],
+        summary: { list_id: record.list_id, name: record.name, checked: !!record.checked } });
       return;
     }
 

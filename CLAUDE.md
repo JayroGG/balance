@@ -39,6 +39,8 @@ npm test                         # Jest suite (sets NODE_ENV=test itself)
 
 - **Shopping lists (ADR-008):** pre-expense checklists that stay **out of the ledger** until checkout. `shopping_lists` is context-scoped like transactions; `shopping_list_items` is scoped by its **parent list** (hand-written model, not `modelGenerator`) so a shared list shows every member's items — item hooks resolve the list via `req.context` and `404` if it isn't visible. `POST /shopping-lists/:id/checkout { amount }` books **one expense** into the list's own context, links it, and freezes the list (`status: 'purchased'` — no further edits, no re-checkout). It **reuses** the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard before any write, then commits the expense + freeze in one `db.transaction`. Item `price` is a per-unit estimate; the checkout `amount` is authoritative. Deleting a list cascades to items and leaves the transaction intact.
 
+- **Activity events (ADR-009):** every successful mutation appends to the immutable `events` ledger (append-only like `vault_history`; hand-written model). Actor = `req.userId`; `team_id` = the **affected record's** context (items use the parent list's). Emitted from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, and from controllers for allocate/withdraw, checkout (inside its atomic commit), and team management. `summary` is a JSON display snapshot with **decimal** amounts. `GET /events` (read-only, `context: true`) returns the newest-first feed — `entity`/`action`/`since_id`/`limit` (default 50, max 200) params, `actor_email` joined; personal feed = own actions, team feed = all members'; reads open to every role. Unlogged by design: categories, renames, team create/delete. North star: Expo remote push over this same ledger.
+
 ### Vault / balance model (the core logic)
 
 Vaults are logical allocations within one balance, not separate accounts. Transactions are a **pure ledger**; allocation is a **separate, amount-based** operation. Balances are **derived live** from two ledgers — never stored (see ADR-004). Cent-level helpers live in `entities/balance/db/queries.js`.
@@ -63,6 +65,7 @@ Allocate (`POST /vaults/:id/allocate { amount }`) moves spendable money into a v
 | `src/utils/{modelGenerator,restGenerator}/` | Generic CRUD model + routes/handlers. |
 | `src/entities/{transactions,vaults,categories,balance}/` | Feature entities (constants, `db/`, `http/`). |
 | `src/entities/{shopping-lists,shopping-list-items}/` | Checklists + checkout controller (books one expense). |
+| `src/entities/events/` | Append-only activity ledger (hand-written model) + read-only `/events` feed. |
 | `src/app.js` / `src/server.js` | Express wiring / boot sequence. |
 
 ## Workflow

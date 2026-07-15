@@ -189,9 +189,6 @@ describe('history endpoint', () => {
   it('returns movements newest-first with decimal amounts', async () => {
     await me.post('/transactions', { type: 'income', amount: 300 });
     const loanId = (await me.post('/loans', { name: 'Kim', amount: 100 })).body.id;
-    // created_at has second-level precision; wait past the boundary so the
-    // repay is unambiguously newer than the lend for the DESC ordering.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
     await me.post(`/loans/${loanId}/repay`, { amount: 40 });
 
     const history = (await me.get(`/loans/${loanId}/history`)).body;

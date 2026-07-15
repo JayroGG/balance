@@ -11,7 +11,7 @@ const add = (userId, loanId, action, amountCents) =>
 // loan's full movement history (across all member actors) is the ledger.
 const findByLoan = (loanId) =>
   db.prepare(
-    `SELECT * FROM loan_history WHERE loan_id = ? ORDER BY created_at DESC`
+    `SELECT * FROM loan_history WHERE loan_id = ? ORDER BY created_at DESC, id DESC`
   ).all(loanId).map((h) => ({ ...h, amount: toDecimal(h.amount) }));
 
 // amount = SUM(lend); pending = SUM(lend) - SUM(repay) — one grouped query, cents.

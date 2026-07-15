@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   type        TEXT    NOT NULL CHECK (type IN ('income', 'expense')),
   amount      INTEGER NOT NULL CHECK (amount > 0),
   category_id INTEGER REFERENCES categories(id),
+  loan_id     INTEGER REFERENCES loans(id),  -- journal flag (ADR-010): set by lend/repay, excluded from balance
   description TEXT,
   occurred_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
   created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -98,6 +99,32 @@ CREATE TABLE IF NOT EXISTS vault_history (
   created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS idx_vault_history_vault ON vault_history(vault_id);
+
+-- Receivables: money lent out (ADR-010). Context-scoped like vaults. No money
+-- columns: amount/pending derive from loan_history, like a vault balance.
+CREATE TABLE IF NOT EXISTS loans (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  team_id    INTEGER REFERENCES teams(id),
+  name       TEXT    NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  updated_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  deleted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
+CREATE INDEX IF NOT EXISTS idx_loans_team ON loans(team_id);
+
+-- Append-only ledger of loan movements; source of truth for loan figures.
+-- pending = SUM(lend) - SUM(repay); amount lent = SUM(lend).
+CREATE TABLE IF NOT EXISTS loan_history (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  loan_id    INTEGER NOT NULL REFERENCES loans(id),
+  action     TEXT    NOT NULL CHECK (action IN ('lend', 'repay')),
+  amount     INTEGER NOT NULL CHECK (amount > 0),
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_loan_history_loan ON loan_history(loan_id);
 
 -- Pre-expense checklists. Context-scoped like transactions (team_id + ?team_id=).
 -- Checkout books one expense transaction (transaction_id) and freezes status -> 'purchased'.

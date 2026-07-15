@@ -40,6 +40,10 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
     }
 
     case BEFORE_UPDATE: {
+      if (previous.loan_id != null) {
+        const e = new Error('Loan journal transactions are read-only; use the loan lend/repay endpoints');
+        e.status = 400; throw e;
+      }
       const resolvedType = body.type !== undefined ? body.type : previous.type;
       assertType(resolvedType);
       const oldContribution = contribution(previous.type, toCents(previous.amount));
@@ -50,6 +54,10 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
     }
 
     case BEFORE_DESTROY: {
+      if (record.loan_id != null) {
+        const e = new Error('Loan journal transactions are read-only; use the loan lend/repay endpoints');
+        e.status = 400; throw e;
+      }
       assertSpendable(req.context, -contribution(record.type, toCents(record.amount)));
       return;
     }

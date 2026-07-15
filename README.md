@@ -39,9 +39,10 @@ NODE_ENV=prod npm start
 
 Transactions are a pure ledger. Allocation is a **separate, amount-based** operation: `POST /vaults/:id/allocate { amount }` moves spendable money into a vault, `withdraw { amount }` returns it. Each appends a row to the append-only `vault_history` ledger (the source of truth for vault balances). The balance endpoint reports:
 
-- `total` — net worth (`income − expense`), unaffected by vault moves.
-- `available` — spendable (`total − money in vaults`); a hard `≥ 0` invariant.
-- `vaults[]` — each vault's balance.
+- `total` — net worth (`income − expense`, skipping loan journal rows), unaffected by vault or loan moves.
+- `available` — spendable (`total − money in vaults − money lent out`); a hard `≥ 0` invariant.
+- `lent` — total still owed to you across loans.
+- `vaults[]` / `loans[]` — each vault's balance; each loan's `amount` (total lent) and `pending`.
 
 Any write that would push `available` below zero (overspending, or shrinking income whose money is vaulted) is rejected `400`; a vault deletes only at balance 0. See [`.claude/ADR/ADR-004-vault-allocation-model.md`](./.claude/ADR/ADR-004-vault-allocation-model.md).
 
@@ -64,8 +65,15 @@ GET    /vaults/:id/history
 POST   /vaults/:id/allocate      { amount }      (≤ available)
 POST   /vaults/:id/withdraw      { amount }      (≤ vault balance)
 
+# Loans (CRUD + soft delete) + actions
+GET/POST /loans ; GET/PUT/DELETE /loans/:id   (PUT: { name } only; DELETE requires pending = 0)
+POST   /loans                    { name, amount?, pre_existing? }
+GET    /loans/:id/history
+POST   /loans/:id/lend           { amount }      (≤ available)
+POST   /loans/:id/repay          { amount }      (≤ pending)
+
 # Balance
-GET    /balance                  { total, available, vaults:[{id,name,balance,target?}], currency }
+GET    /balance                  { total, available, lent, vaults:[...], loans:[{id,name,amount,pending}], currency }
 
 # Shopping lists (CRUD + soft delete) + checkout
 GET/POST /shopping-lists ; GET/PUT/DELETE /shopping-lists/:id   (frozen once purchased)
@@ -79,6 +87,17 @@ PUT/DELETE /shopping-list-items/:id
 # Activity feed (read-only, append-only ledger)
 GET    /events                   ?entity= &action= &since_id= &limit=   (newest first)
 ```
+
+## Loans
+
+Money you **lent to someone** — a receivable. `POST /loans/:id/lend { amount }` converts spendable
+cash into the loan's `pending` (bounded by `available`); `repay` releases it back. Net worth never
+moves — it's your money either way. Each movement also books a **journal transaction** (marked with
+`loan_id`) so the transaction list tells the whole story; journal rows are excluded from balance
+math and read-only. Creating a loan with `pre_existing: true` records money lent *before* the app
+existed: it posts a counted opening income plus the lend, so `total` grows by the amount while
+`available` stays put. See
+[`.claude/ADR/ADR-010-loans-lent-money.md`](./.claude/ADR/ADR-010-loans-lent-money.md).
 
 ## Shopping lists
 

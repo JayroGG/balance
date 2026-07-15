@@ -41,6 +41,7 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
 | **Shopping lists** | Pre-expense checklists, kept **out of the ledger** until checkout books a single expense transaction for the whole list. Item prices are per-unit *estimates*; the checkout `amount` is authoritative. (ADR-008.) |
 | **Activity events** | Every successful mutation appends to an **append-only `events` ledger**; `GET /events` serves a polled, context-scoped feed. Remote push (Expo) is the recorded north star delivery channel. (ADR-009.) |
+| **Loans** | Receivables (money lent out) mirroring the vault model: figures derive from an append-only `loan_history` ledger; lend/repay book **journal transactions** (`loan_id`, excluded from balance math, read-only); `available = total − locked − lent`. (ADR-010.) |
 
 ## 5. Data Model
 
@@ -49,8 +50,10 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **users** — `id, email, password_hash (nullable for now), …`
 - **categories** — `id, user_id, name, kind ('income'|'expense'|'both'), …`
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
-- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference.
+- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), loan_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference. Rows with `loan_id` set are **loan journal entries**: display-only history, excluded from balance math, server-owned and read-only (ADR-010).
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
+- **loans** — `id, user_id, team_id (nullable), name, …` — a receivable (money lent to someone). **No money columns**: `amount` (Σ lend) and `pending` (Σ lend − Σ repay) derive from `loan_history`, like a vault balance.
+- **loan_history** — `id, user_id, loan_id, action ('lend'|'repay'), amount (cents, > 0), created_at` — **append-only ledger of loan movements; the source of truth for loan figures**.
 - **shopping_lists** — `id, user_id, team_id (nullable), name, status ('open'|'purchased'), category_id (FK, nullable), transaction_id (FK, nullable), …` — a pre-expense checklist. `status` and `transaction_id` are **server-owned** (set only by checkout).
 - **shopping_list_items** — `id, user_id, list_id (FK), name, qty (real, > 0), price (cents, nullable), checked, …` — checklist rows, scoped by their **parent list** rather than by user/team. `price` is a per-**unit** estimate.
 - **events** — `id, user_id (actor), team_id (nullable), entity, entity_id, action, summary (JSON, decimal amounts), created_at` — **append-only activity ledger** (immutable: no updates, no soft deletes); source of truth for the `/events` feed.
@@ -59,6 +62,7 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - `amount` is always a positive integer; `type` carries the sign meaning.
 - `available ≥ 0` at all times — money in a vault is untouchable; any write that would push it negative is rejected `400` (see §6).
 - A vault may only be deleted when its balance is `0` (withdraw it to zero first).
+- A loan may only be deleted when its `pending` is `0` (repay — or someday write off — first); its journal rows survive deletion.
 - A `purchased` shopping list is frozen history: no edits to it or its items, and no second checkout (`400`).
 
 See `ARCHITECTURE.md` for the Mermaid ER diagram.
@@ -69,10 +73,11 @@ Vaults are **logical allocations within a single balance**, not separate sub-acc
 
 **Balance figures** (computed live, all in integer cents, always filtering `deleted_at IS NULL`):
 
-- `total` (net worth) = `SUM(income) − SUM(expense)` — from `transactions`; **unaffected** by allocate/withdraw.
+- `total` (net worth) = `SUM(income) − SUM(expense)` — from `transactions` **where `loan_id IS NULL`** (journal rows are display-only); **unaffected** by allocate/withdraw and lend/repay.
 - `vault[V] balance` = `SUM(allocate) − SUM(withdraw)` for V — from `vault_history`.
 - `locked` = `SUM(vault[V])` over active vaults.
-- `available` (spendable) = `total − locked`.
+- `loan[L] pending` = `SUM(lend) − SUM(repay)` for L — from `loan_history`; `lent` = `SUM(loan[L])` over active loans.
+- `available` (spendable) = `total − locked − lent`.
 
 **Allocate** `POST /vaults/:id/allocate { amount }`: move spendable money into a vault → vault balance ↑, available ↓; appends an `allocate` row. Bounded by `amount ≤ available`.
 
@@ -90,7 +95,28 @@ Worked example:
 | expense −1 (would make available −1) | — | — | **rejected 400** |
 | withdraw 500 from E | 500 | 0 | 500 |
 
-**Derived, not stored:** balances are always computed from the two ledgers (`transactions`, `vault_history`); there is no materialized balance. A SQLite VIEW is the only sanctioned read-side convenience if ever needed (still derived, zero drift). See ADR-004 for the rationale.
+**Derived, not stored:** balances are always computed from the ledgers (`transactions`, `vault_history`, `loan_history`); there is no materialized balance. A SQLite VIEW is the only sanctioned read-side convenience if ever needed (still derived, zero drift). See ADR-004 for the rationale.
+
+## 6d. Loans (ADR-010)
+
+A **loan is a receivable** — money lent to someone (`name` = usually the person). It mirrors the
+vault model: **lend** (`POST /loans/:id/lend { amount }`, ≤ `available`) moves spendable money into
+the loan's `pending`; **repay** (≤ `pending`) releases it back. Neither changes `total` — cash
+converts to a claim and back. Lent wealth counts toward net worth but never toward spendable.
+
+- **Journal rows.** Every lend/repay also books a transaction (`expense`/`income`, description =
+  loan name) carrying `loan_id` — "the ledger tells the whole story." Journal rows are excluded
+  from balance math and **read-only** via `/transactions` (`400` on PUT/DELETE): their truth lives
+  in `loan_history`.
+- **Creation semantics** (`POST /loans`): `{ name }` → empty loan; `{ name, amount }` → create +
+  initial lend atomically (≤ `available`); `{ name, amount, pre_existing: true }` → additionally
+  posts a **counted** plain income (`"Loan opening: <name>"`, `loan_id NULL`) so a loan made before
+  the app existed lands as `total +amount`, `available ±0` — all in one `db.transaction`.
+- **Invariants reused:** the `available ≥ 0` rule simply evaluates against the discounted
+  `available` everywhere it already fires — e.g. deleting an opening income while the money is
+  still lent is rejected `400`. A loan deletes only at `pending = 0`.
+- **North star (deferred):** `POST /loans/:id/write-off` (counted expense for the remaining
+  pending — wealth genuinely lost) and a `direction` column for borrowed money. See ADR-010.
 
 ## 6b. Shopping Lists (ADR-008)
 
@@ -122,9 +148,10 @@ display (amounts as **decimals**). Events are immutable: never updated, never so
 - **Feed.** Newest first; `entity`/`action` equality filters; `since_id` (only `id >`) and `limit`
   (default 50, max 200) for incremental polling and unread badges; `actor_email` joined in.
 - **Catalog.** transactions created/updated/deleted · vaults created/deleted/allocated/withdrawn ·
-  shopping lists created/checked_out/deleted · items created/updated/deleted (carry the parent
-  list's context) · team updated/member_added/member_removed/role_changed. Deliberately unlogged:
-  categories, vault/list renames, team create/delete.
+  loans created/updated/deleted/lent/repaid (journal rows log **no** transaction event — the loan
+  event is the story) · shopping lists created/checked_out/deleted · items created/updated/deleted
+  (carry the parent list's context) · team updated/member_added/member_removed/role_changed.
+  Deliberately unlogged: categories, vault/list renames, team create/delete.
 - **North star:** remote push (Expo Push Service) delivering these same events while the app is
   closed — blocked only on a paid Apple Developer membership; the ledger/feed need no changes.
 
@@ -147,8 +174,16 @@ GET    /vaults/:id/history       (vault_history movement ledger)
 POST   /vaults/:id/allocate      { amount }      (≤ available)
 POST   /vaults/:id/withdraw      { amount }      (≤ vault balance)
 
+# Loans (CRUD + soft delete) + actions                        (ADR-010)
+GET/POST /loans ; GET/PUT/DELETE /loans/:id     (PUT: { name } only; DELETE requires pending = 0)
+POST   /loans                    { name, amount?, pre_existing? }   (see §6d creation semantics)
+GET    /loans/:id/history        (loan_history movement ledger)
+POST   /loans/:id/lend           { amount }      (≤ available; books a journal expense)
+POST   /loans/:id/repay          { amount }      (≤ pending; books a journal income)
+
 # Balance (aggregate business logic)
-GET    /balance                 { total, available, vaults:[{id,name,balance,target?}], currency }
+GET    /balance                 { total, available, lent, vaults:[{id,name,balance,target?}],
+                                  loans:[{id,name,amount,pending}], currency }
 
 # Shopping lists (CRUD + soft delete) + checkout            (ADR-008)
 GET    /shopping-lists          ?status=open|purchased

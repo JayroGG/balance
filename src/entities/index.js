@@ -1,6 +1,7 @@
 'use strict';
 const { Entity: CategoriesEntity }   = require('./categories');
 const { Entity: VaultsEntity }       = require('./vaults');
+const { Entity: LoansEntity }        = require('./loans');
 const { Entity: TransactionsEntity } = require('./transactions');
 const { Entity: BalanceEntity }      = require('./balance');
 const { Entity: TeamsEntity }        = require('./teams');
@@ -10,6 +11,6 @@ const { Entity: ShoppingListItemsEntity } = require('./shopping-list-items');
 const { Entity: EventsEntity }            = require('./events');
 
 module.exports = {
-  CategoriesEntity, VaultsEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity,
+  CategoriesEntity, VaultsEntity, LoansEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity,
   ShoppingListsEntity, ShoppingListItemsEntity, EventsEntity,
 };

@@ -14,13 +14,13 @@ const where = ({ userId, teamId, targetUserId }) =>
     ? { sql: 'team_id = ?', value: teamId }
     : { sql: 'user_id = ? AND team_id IS NULL', value: targetUserId != null ? targetUserId : userId };
 
-// net worth = SUM(income) - SUM(expense)
+// net worth = SUM(income) - SUM(expense), skipping loan journal rows (display-only)
 const netWorthCents = (scope) => {
   const { sql, value } = where(scope);
   return db.prepare(`
     SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS net
     FROM transactions
-    WHERE ${sql} AND deleted_at IS NULL
+    WHERE ${sql} AND deleted_at IS NULL AND loan_id IS NULL
   `).get(value).net;
 };
 
@@ -44,14 +44,35 @@ const lockedCents = (scope) => {
   `).get(value).locked;
 };
 
-// available = net worth - locked (invariant: >= 0)
-const availableCents = (scope) => netWorthCents(scope) - lockedCents(scope);
+// loan[L] pending = SUM(lend) - SUM(repay). The loan belongs to exactly one
+// context, and is authorized upstream, so we sum purely by loan_id.
+const loanPendingCents = (scope, loanId) =>
+  db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN action = 'lend' THEN amount ELSE -amount END), 0) AS pending
+    FROM loan_history
+    WHERE loan_id = ?
+  `).get(loanId).pending;
+
+// lent = SUM of pending across the context's active loans
+const lentCents = (scope) => {
+  const { sql, value } = where(scope);
+  return db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN lh.action = 'lend' THEN lh.amount ELSE -lh.amount END), 0) AS lent
+    FROM loan_history lh
+    JOIN loans l ON l.id = lh.loan_id
+    WHERE l.${sql} AND l.deleted_at IS NULL
+  `).get(value).lent;
+};
+
+// available = net worth - locked - lent (invariant: >= 0)
+const availableCents = (scope) => netWorthCents(scope) - lockedCents(scope) - lentCents(scope);
 
 // --- API view ---
 
 const get = (scope) => {
   const net = netWorthCents(scope);
   const locked = lockedCents(scope);
+  const lent = lentCents(scope);
   const { sql, value } = where(scope);
 
   const vaults = db.prepare(`
@@ -63,17 +84,36 @@ const get = (scope) => {
     GROUP BY v.id ORDER BY v.name
   `).all(value);
 
+  const loans = db.prepare(`
+    SELECT l.id, l.name,
+           COALESCE(SUM(CASE WHEN lh.action = 'lend' THEN lh.amount ELSE 0 END), 0)          AS amount,
+           COALESCE(SUM(CASE WHEN lh.action = 'lend' THEN lh.amount ELSE -lh.amount END), 0) AS pending
+    FROM loans l
+    LEFT JOIN loan_history lh ON lh.loan_id = l.id
+    WHERE l.${sql} AND l.deleted_at IS NULL
+    GROUP BY l.id ORDER BY l.name
+  `).all(value);
+
   return {
     total:     toDecimal(net),
-    available: toDecimal(net - locked),
+    available: toDecimal(net - locked - lent),
+    lent:      toDecimal(lent),
     vaults:    vaults.map((v) => ({
       id:      v.id,
       name:    v.name,
       balance: toDecimal(v.balance),
       target:  v.target_amount != null ? toDecimal(v.target_amount) : null,
     })),
+    loans:     loans.map((l) => ({
+      id:      l.id,
+      name:    l.name,
+      amount:  toDecimal(l.amount),
+      pending: toDecimal(l.pending),
+    })),
     currency,
   };
 };
 
-module.exports = { get, netWorthCents, vaultBalanceCents, lockedCents, availableCents };
+module.exports = {
+  get, netWorthCents, vaultBalanceCents, lockedCents, availableCents, lentCents, loanPendingCents,
+};

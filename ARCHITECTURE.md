@@ -11,6 +11,9 @@ erDiagram
     users ||--o{ transactions : owns
     categories ||--o{ transactions : classifies
     vaults ||--o{ vault_history : "balance ledger"
+    users ||--o{ loans : owns
+    loans ||--o{ loan_history : "pending ledger"
+    loans |o--o{ transactions : "journal rows (loan_id)"
     users ||--o{ shopping_lists : owns
     shopping_lists ||--o{ shopping_list_items : contains
     shopping_lists |o--o| transactions : "booked at checkout"
@@ -45,6 +48,7 @@ erDiagram
         string type "income|expense"
         int amount "cents, > 0"
         int category_id FK "nullable"
+        int loan_id FK "nullable: journal row, excluded from balance"
         string description
         date occurred_at
         datetime deleted_at "nullable"
@@ -54,6 +58,21 @@ erDiagram
         int user_id FK
         int vault_id FK
         string action "allocate|withdraw"
+        int amount "cents, > 0"
+        datetime created_at
+    }
+    loans {
+        int id PK
+        int user_id FK
+        int team_id FK "nullable = personal"
+        string name "usually the debtor"
+        datetime deleted_at "nullable"
+    }
+    loan_history {
+        int id PK
+        int user_id FK
+        int loan_id FK
+        string action "lend|repay"
         int amount "cents, > 0"
         datetime created_at
     }
@@ -93,6 +112,7 @@ erDiagram
 - All amounts are integer **cents**. API converts to/from decimals at the boundary.
 - All tables soft-delete via nullable `deleted_at` (`NULL` = active). Every read filters `deleted_at IS NULL`.
 - `transactions` is a **pure ledger** — no vault reference. `vault_history` is the **append-only source of truth** for vault balances (`balance = Σallocate − Σwithdraw`). See ADR-004.
+- `loans` mirrors the vault model: no money columns; `loan_history` is the append-only source of truth (`pending = Σlend − Σrepay`, `amount = Σlend`). Lend/repay also book **journal transactions** (`loan_id` set) — display-only, excluded from balance math, read-only via `/transactions`. See ADR-010.
 - `shopping_list_items` is keyed by `list_id`, **not** user/team-scoped: a shared list must show every member's items. Access is authorized by resolving the parent list in `req.context`. See ADR-008.
 - `events` is a second **append-only ledger** (like `vault_history`): immutable, no soft delete, written from after-hooks/controllers only. Its `summary` amounts are **decimals** (display snapshots), the one deliberate exception to cents-in-DB. See ADR-009.
 
@@ -100,11 +120,13 @@ erDiagram
 
 ```mermaid
 flowchart TD
-    A["GET /balance"] --> B["SUM(income) - SUM(expense)<br/>= total (net worth)"]
+    A["GET /balance"] --> B["SUM(income) - SUM(expense)<br/>WHERE loan_id IS NULL<br/>= total (net worth)"]
     A --> C["per vault: SUM(allocate) - SUM(withdraw)<br/>= vault balance (from vault_history)"]
-    B --> D["available = total - SUM(all vault balances)"]
+    A --> L["per loan: SUM(lend) - SUM(repay)<br/>= pending (from loan_history)"]
+    B --> D["available = total - SUM(vault balances) - SUM(loan pending)"]
     C --> D
-    D --> E["respond: { total, available, vaults[], currency }"]
+    L --> D
+    D --> E["respond: { total, available, lent, vaults[], loans[], currency }"]
 ```
 
 Allocate / withdraw move an **amount** between spendable and a vault (independent of any transaction):
@@ -120,6 +142,29 @@ stateDiagram-v2
         available can never go below 0
     end note
 ```
+
+## Loans: lent money (ADR-010)
+
+A loan is a receivable — the vault pattern pointed outward. Lend/repay move an **amount** between
+spendable and the loan's pending, and each movement also books a **journal transaction**
+(`loan_id` set, excluded from balance math, read-only) so `/transactions` tells the whole story:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Spendable: income recorded
+    Spendable --> Lent: lend { amount } (≤ available) + journal expense
+    Lent --> Spendable: repay { amount } (≤ pending) + journal income
+    note right of Lent
+        counts toward total (net worth)
+        excluded from available (spendable)
+        pre_existing create adds a counted
+        opening income first (total +A, available ±0)
+    end note
+```
+
+A loan deletes only at `pending = 0`; journal rows survive deletion (frozen history, like
+checkout transactions). Multi-write flows (create-with-amount, pre_existing opening, lend, repay)
+each commit in one `db.transaction` with their event.
 
 ## Shopping list checkout (ADR-008)
 
@@ -230,6 +275,7 @@ balance/
 │   ├── entities/
 │   │   ├── transactions/   # constants, db/{fields,model}, http/{hooks,routes}
 │   │   ├── vaults/         # + http/controller (allocate/withdraw/history), db/history
+│   │   ├── loans/          # + http/controller (create semantics/lend/repay/history), db/history
 │   │   ├── categories/     # constants, db/{fields,model}, http/{hooks,routes}
 │   │   ├── balance/        # db/queries (aggregate), http/routes
 │   │   ├── shopping-lists/ # + http/controller (checkout → books one expense)
@@ -263,8 +309,8 @@ balance/
 - **Cross-entity access:** import the model file directly (e.g. `../../transactions/db/model`), never via the entity `index.js`, to avoid circular deps.
 - **Money:** stored as integer cents; the model layer (`modelGenerator` `moneyFields`) converts decimal↔cents at the read/write boundary.
 - **Auth-ready:** all tables carry `user_id`; only the auth middleware changes in Phase 2.
-- **Balances are derived** from the two ledgers (`transactions`, `vault_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults controller.
-- **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; a vault deletes only at balance 0. See ADR-004.
+- **Balances are derived** from the ledgers (`transactions` where `loan_id IS NULL`, `vault_history`, `loan_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults/loans controllers.
+- **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; lend ≤ available; repay ≤ pending; a vault deletes only at balance 0, a loan only at pending 0. Loan journal rows are read-only via `/transactions`. See ADR-004/ADR-010.
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
 - **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard. See ADR-008.
 - **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

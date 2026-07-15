@@ -11,7 +11,7 @@ const add = (userId, vaultId, action, amountCents) =>
 // vault's full movement history (across all member actors) is the ledger.
 const findByVault = (vaultId) =>
   db.prepare(
-    `SELECT * FROM vault_history WHERE vault_id = ? ORDER BY created_at DESC`
+    `SELECT * FROM vault_history WHERE vault_id = ? ORDER BY created_at DESC, id DESC`
   ).all(vaultId).map((h) => ({ ...h, amount: toDecimal(h.amount) }));
 
 module.exports = { add, findByVault };

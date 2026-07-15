@@ -6,6 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const {
   CategoriesEntity,
   VaultsEntity,
+  LoansEntity,
   TransactionsEntity,
   BalanceEntity,
   TeamsEntity,
@@ -41,6 +42,7 @@ const routes = [
   { path: '/teams',        route: TeamsEntity.routes },
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
+  { path: '/loans',        route: LoansEntity.routes,        context: true },
   { path: '/transactions', route: TransactionsEntity.routes, context: true },
   { path: '/balance',      route: BalanceEntity.routes,      context: true },
   { path: '/shopping-lists',      route: ShoppingListsEntity.routes,     context: true },

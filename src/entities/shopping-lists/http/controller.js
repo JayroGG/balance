@@ -7,14 +7,20 @@ const { ShoppingListItemModel } = require('../../shopping-list-items/db/model');
 const { TransactionModel } = require('../../transactions/db/model');
 const { transactionHooks } = require('../../transactions/http/hooks');
 const { assertCanMutate } = require('../../../lib/access');
+const { EventModel } = require('../../events/db/model');
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
-// Atomic: post the expense, link it, and freeze the list as purchased. Either all
-// three land or none do (better-sqlite3 rolls the transaction back on throw).
-const commit = db.transaction((txScope, txBody, listScope, listId) => {
+// Atomic: post the expense, link it, freeze the list as purchased, and log the
+// checked_out event. Either all land or none do (better-sqlite3 rolls the
+// transaction back on throw). The event goes to the LIST's context; actor is the caller.
+const commit = db.transaction((txScope, txBody, listScope, list, actorId) => {
   const tx = TransactionModel.create(txScope, txBody);
-  return ShoppingListModel.markPurchased(listScope, listId, tx.id);
+  const purchased = ShoppingListModel.markPurchased(listScope, list.id, tx.id);
+  EventModel.log({ userId: actorId, teamId: list.team_id ?? null,
+    entity: 'shopping_list', entityId: list.id, action: 'checked_out',
+    summary: { name: list.name, amount: tx.amount, transaction_id: tx.id } });
+  return purchased;
 });
 
 const checkout = (req, res, next) => {
@@ -49,7 +55,7 @@ const checkout = (req, res, next) => {
     // write, so a violating checkout books nothing.
     transactionHooks({ type: BEFORE_CREATE, body: txBody, req: { context: txScope } });
 
-    res.json(commit(txScope, txBody, req.context, listId));
+    res.json(commit(txScope, txBody, req.context, list, req.userId));
   } catch (e) { next(e); }
 };
 

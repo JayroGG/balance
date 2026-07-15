@@ -1,7 +1,8 @@
 'use strict';
-const { BEFORE_CREATE, BEFORE_DESTROY } = require('../../../constants/hooks');
+const { BEFORE_CREATE, CREATE, BEFORE_DESTROY, DESTROY } = require('../../../constants/hooks');
 // Import balance queries directly to avoid circular index deps
 const { vaultBalanceCents } = require('../../balance/db/queries');
+const { EventModel } = require('../../events/db/model');
 
 const vaultHooks = ({ type, body, record, req }) => {
   switch (type) {
@@ -9,11 +10,21 @@ const vaultHooks = ({ type, body, record, req }) => {
       if (!body.name) { const e = new Error('Missing required field: name'); e.status = 400; throw e; }
       return;
 
+    case CREATE:
+      EventModel.log({ userId: req.userId, teamId: record.team_id ?? null,
+        entity: 'vault', entityId: record.id, action: 'created', summary: { name: record.name } });
+      return;
+
     case BEFORE_DESTROY:
       if (vaultBalanceCents(req.context, record.id) !== 0) {
         const e = new Error('Cannot delete a vault with a non-zero balance; withdraw it to zero first');
         e.status = 400; throw e;
       }
+      return;
+
+    case DESTROY:
+      EventModel.log({ userId: req.userId, teamId: record.team_id ?? null,
+        entity: 'vault', entityId: record.id, action: 'deleted', summary: { name: record.name } });
       return;
 
     default:

@@ -2,6 +2,8 @@
 const { TeamModel } = require('../db/model');
 const members = require('../db/members');
 const { normalizeColor } = require('./hooks');
+// Direct import (never via entity index) to avoid circular deps.
+const { EventModel } = require('../../events/db/model');
 
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
@@ -54,6 +56,8 @@ const addMember = (req, res, next) => {
     if (!targetId) throw httpError('User not found', 404);
 
     members.addMember(teamId, targetId, role);
+    EventModel.log({ userId: req.userId, teamId, entity: 'team', entityId: teamId,
+      action: 'member_added', summary: { user_id: targetId, role } });
     res.status(201).json(members.listMembers(teamId));
   } catch (e) { next(e); }
 };
@@ -75,6 +79,8 @@ const changeRole = (req, res, next) => {
     }
 
     members.setRole(teamId, targetId, role);
+    EventModel.log({ userId: req.userId, teamId, entity: 'team', entityId: teamId,
+      action: 'role_changed', summary: { user_id: targetId, role } });
     res.json(members.listMembers(teamId));
   } catch (e) { next(e); }
 };
@@ -92,7 +98,10 @@ const update = (req, res, next) => {
     const patch = {};
     if (name !== undefined) patch.name = name;
     if (color !== undefined) patch.color = normalizeColor(color); // null clears
-    res.json(TeamModel.updateById(teamId, patch));
+    const team = TeamModel.updateById(teamId, patch);
+    EventModel.log({ userId: req.userId, teamId, entity: 'team', entityId: teamId,
+      action: 'updated', summary: patch });
+    res.json(team);
   } catch (e) { next(e); }
 };
 
@@ -119,6 +128,8 @@ const removeMember = (req, res, next) => {
       throw httpError('Cannot remove the last owner', 400);
     }
     members.removeMember(teamId, targetId);
+    EventModel.log({ userId: req.userId, teamId, entity: 'team', entityId: teamId,
+      action: 'member_removed', summary: { user_id: targetId } });
     res.status(204).send();
   } catch (e) { next(e); }
 };

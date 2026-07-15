@@ -15,6 +15,7 @@ erDiagram
     shopping_lists ||--o{ shopping_list_items : contains
     shopping_lists |o--o| transactions : "booked at checkout"
     categories ||--o{ shopping_lists : "default at checkout"
+    users ||--o{ events : "acts (activity ledger)"
 
     users {
         int id PK
@@ -76,6 +77,16 @@ erDiagram
         int checked "0|1"
         datetime deleted_at "nullable"
     }
+    events {
+        int id PK
+        int user_id FK "actor"
+        int team_id FK "nullable = personal"
+        string entity
+        int entity_id
+        string action
+        string summary "JSON snapshot, decimal amounts"
+        datetime created_at
+    }
 ```
 
 **Notes**
@@ -83,6 +94,7 @@ erDiagram
 - All tables soft-delete via nullable `deleted_at` (`NULL` = active). Every read filters `deleted_at IS NULL`.
 - `transactions` is a **pure ledger** — no vault reference. `vault_history` is the **append-only source of truth** for vault balances (`balance = Σallocate − Σwithdraw`). See ADR-004.
 - `shopping_list_items` is keyed by `list_id`, **not** user/team-scoped: a shared list must show every member's items. Access is authorized by resolving the parent list in `req.context`. See ADR-008.
+- `events` is a second **append-only ledger** (like `vault_history`): immutable, no soft delete, written from after-hooks/controllers only. Its `summary` amounts are **decimals** (display snapshots), the one deliberate exception to cents-in-DB. See ADR-009.
 
 ## Balance calculation flow
 
@@ -222,6 +234,7 @@ balance/
 │   │   ├── balance/        # db/queries (aggregate), http/routes
 │   │   ├── shopping-lists/ # + http/controller (checkout → books one expense)
 │   │   ├── shopping-list-items/  # hand-written model: list-keyed, not user-scoped
+│   │   ├── events/         # append-only activity ledger; hand-written model + read-only /events feed
 │   │   └── index.js        # collects all entities
 │   ├── app.js              # express wiring (mounts entity routes + middleware)
 │   └── server.js           # boot: config → migrate → seed → listen
@@ -254,3 +267,4 @@ balance/
 - **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; a vault deletes only at balance 0. See ADR-004.
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
 - **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard. See ADR-008.
+- **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

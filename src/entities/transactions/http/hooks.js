@@ -1,8 +1,11 @@
 'use strict';
-const { BEFORE_CREATE, BEFORE_UPDATE, BEFORE_DESTROY } = require('../../../constants/hooks');
+const { BEFORE_CREATE, CREATE, BEFORE_UPDATE, UPDATE, BEFORE_DESTROY, DESTROY } = require('../../../constants/hooks');
 const { toCents } = require('../../../lib/money');
 // Import balance queries directly to avoid circular index deps
 const { availableCents } = require('../../balance/db/queries');
+const { EventModel } = require('../../events/db/model');
+
+const EVENT_ACTIONS = { [CREATE]: 'created', [UPDATE]: 'updated', [DESTROY]: 'deleted' };
 
 const VALID_TYPES = ['income', 'expense'];
 
@@ -50,6 +53,19 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
       assertSpendable(req.context, -contribution(record.type, toCents(record.amount)));
       return;
     }
+
+    // After-hooks: log what actually landed (record is post-write, amounts decimal).
+    // Checkout invokes this hook manually with BEFORE_CREATE only and logs its own
+    // checked_out event, so nothing doubles up here.
+    case CREATE:
+    case UPDATE:
+    case DESTROY:
+      EventModel.log({
+        userId: req.userId, teamId: record.team_id ?? null,
+        entity: 'transaction', entityId: record.id, action: EVENT_ACTIONS[type],
+        summary: { type: record.type, amount: record.amount, description: record.description },
+      });
+      return;
 
     default:
       return;

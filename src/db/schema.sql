@@ -130,3 +130,19 @@ CREATE TABLE IF NOT EXISTS shopping_list_items (
   deleted_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_shopping_list_items_list ON shopping_list_items(list_id);
+
+-- Append-only activity ledger (ADR-009). Immutable: no updates, no soft deletes.
+-- user_id is the ACTOR; team_id is the affected record's context (NULL = personal).
+-- summary is a JSON display snapshot; amounts inside it are DECIMALS (client-ready).
+CREATE TABLE IF NOT EXISTS events (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  team_id    INTEGER REFERENCES teams(id),
+  entity     TEXT    NOT NULL,
+  entity_id  INTEGER NOT NULL,
+  action     TEXT    NOT NULL,
+  summary    TEXT,
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_events_team ON events(team_id);
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id);

@@ -12,6 +12,7 @@ const {
   AuthEntity,
   ShoppingListsEntity,
   ShoppingListItemsEntity,
+  EventsEntity,
 } = require('./entities');
 
 const app = express();
@@ -44,6 +45,7 @@ const routes = [
   { path: '/balance',      route: BalanceEntity.routes,      context: true },
   { path: '/shopping-lists',      route: ShoppingListsEntity.routes,     context: true },
   { path: '/shopping-list-items', route: ShoppingListItemsEntity.routes, context: true },
+  { path: '/events',              route: EventsEntity.routes,            context: true },
 ];
 
 routes.forEach(({ path, route, context }) =>

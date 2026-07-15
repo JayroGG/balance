@@ -7,8 +7,9 @@ const { Entity: TeamsEntity }        = require('./teams');
 const { Entity: AuthEntity }         = require('./auth');
 const { Entity: ShoppingListsEntity }     = require('./shopping-lists');
 const { Entity: ShoppingListItemsEntity } = require('./shopping-list-items');
+const { Entity: EventsEntity }            = require('./events');
 
 module.exports = {
   CategoriesEntity, VaultsEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity,
-  ShoppingListsEntity, ShoppingListItemsEntity,
+  ShoppingListsEntity, ShoppingListItemsEntity, EventsEntity,
 };

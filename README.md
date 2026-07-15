@@ -75,6 +75,9 @@ POST   /shopping-lists/:id/checkout  { amount, category_id?, occurred_at? }
 GET    /shopping-list-items      ?list_id=   (required)
 POST   /shopping-list-items      { list_id, name, qty?, price?, checked? }
 PUT/DELETE /shopping-list-items/:id
+
+# Activity feed (read-only, append-only ledger)
+GET    /events                   ?entity= &action= &since_id= &limit=   (newest first)
 ```
 
 ## Shopping lists
@@ -85,6 +88,15 @@ list (you send the real total), links it, and freezes the list as `purchased` hi
 that would push `available` below zero is rejected `400` and books nothing. Deleting a list removes
 its items but keeps the transaction — the money was really spent. See
 [`.claude/ADR/ADR-008-shopping-lists-checkout.md`](./.claude/ADR/ADR-008-shopping-lists-checkout.md).
+
+## Activity feed
+
+Every successful write (transactions, vault moves, list activity, checkouts, team management) is
+recorded in an append-only `events` ledger. `GET /events` returns the newest-first feed — personal
+by default (your own actions), `?team_id=` for a team's shared activity (all members' actions,
+readable by every role). Poll incrementally with `since_id` + `limit` (e.g. for unread badges).
+Events are immutable history. See
+[`.claude/ADR/ADR-009-activity-events-ledger.md`](./.claude/ADR/ADR-009-activity-events-ledger.md).
 
 ## Deployment (Fly.io)
 

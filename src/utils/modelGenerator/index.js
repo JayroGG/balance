@@ -31,18 +31,20 @@ const modelGenerator = (tableName, fields) => {
   // - team-scoped + teamId set -> team rows (any member); membership is verified upstream.
   // - team-scoped + no teamId  -> personal rows only (user's own, not tagged to a team).
   // - not team-scoped          -> the user's own rows (teamId ignored).
-  const scopeClause = ({ userId, teamId, isAdmin, targetUserId }) => {
+  // alias qualifies the columns when the caller joins other tables.
+  const scopeClause = ({ userId, teamId, isAdmin, targetUserId }, alias = '') => {
+    const p = alias ? `${alias}.` : '';
     if (isAdmin) {
-      if (teamScoped && teamId != null) return { sql: 'team_id = ?', values: [teamId] };
+      if (teamScoped && teamId != null) return { sql: `${p}team_id = ?`, values: [teamId] };
       const uid = targetUserId != null ? targetUserId : userId;
       return teamScoped
-        ? { sql: 'user_id = ? AND team_id IS NULL', values: [uid] }
-        : { sql: 'user_id = ?', values: [uid] };
+        ? { sql: `${p}user_id = ? AND ${p}team_id IS NULL`, values: [uid] }
+        : { sql: `${p}user_id = ?`, values: [uid] };
     }
-    if (!teamScoped) return { sql: 'user_id = ?', values: [userId] };
+    if (!teamScoped) return { sql: `${p}user_id = ?`, values: [userId] };
     return teamId != null
-      ? { sql: 'team_id = ?', values: [teamId] }
-      : { sql: 'user_id = ? AND team_id IS NULL', values: [userId] };
+      ? { sql: `${p}team_id = ?`, values: [teamId] }
+      : { sql: `${p}user_id = ? AND ${p}team_id IS NULL`, values: [userId] };
   };
 
   // Single-row ops: an admin reaches ANY record by id (god-mode); everyone else
@@ -109,6 +111,7 @@ const modelGenerator = (tableName, fields) => {
   };
 
   return {
+    scopeClause,
     findAll,
     findById,
     create,

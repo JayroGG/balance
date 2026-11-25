@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_transactions_user     ON transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_team     ON transactions(team_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_occurred ON transactions(team_id, occurred_at, id);
 
 -- Append-only ledger of vault movements; source of truth for vault balances.
 -- A vault's balance = SUM(allocate) - SUM(withdraw). Movements are not tied to a transaction.

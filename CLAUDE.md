@@ -43,6 +43,8 @@ npm test                         # Jest suite (sets NODE_ENV=test itself)
 
 - **Activity events (ADR-009):** every successful mutation appends to the immutable `events` ledger (append-only like `vault_history`; hand-written model). Actor = `req.userId`; `team_id` = the **affected record's** context (items use the parent list's). Emitted from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, and from controllers for allocate/withdraw, checkout (inside its atomic commit), and team management. `summary` is a JSON display snapshot with **decimal** amounts. `GET /events` (read-only, `context: true`) returns the newest-first feed — `entity`/`action`/`since_id`/`limit` (default 50, max 200) params, `actor_email` joined; personal feed = own actions, team feed = all members'; reads open to every role. Unlogged by design: categories, renames, team create/delete. North star: Expo remote push over this same ledger.
 
+- **Transactions search (ADR-011):** `GET /transactions` is a custom route (before `restGenerator`) returning `{ items, next_cursor, totals }`. Params: `q` (description/category name, literal LIKE), `from`/`to` (inclusive `YYYY-MM-DD`), `type`, `category_id`, `loans=only|exclude`, `sort=asc|desc`, `limit` (30/100), `cursor` (opaque keyset on `(occurred_at, id)`); bad input → `400`. `totals` cover the whole filtered set and exclude journal rows (`count` includes them). Param parsing/cursor codec lives in `src/lib/pagination.js`, shared with `/events`; scope reuses `modelGenerator`'s `scopeClause(scope, alias)`.
+
 ### Vault / balance model (the core logic)
 
 Vaults are logical allocations within one balance, not separate accounts. Transactions are a **pure ledger**; allocation is a **separate, amount-based** operation. Balances are **derived live** from two ledgers — never stored (see ADR-004). Cent-level helpers live in `entities/balance/db/queries.js`.
@@ -63,6 +65,7 @@ Allocate (`POST /vaults/:id/allocate { amount }`) moves spendable money into a v
 | `src/db/schema.sql` | Full DDL (all tables, indexes, constraints). |
 | `src/db/migrate.js` / `seed.js` | Apply schema / seed user + categories. |
 | `src/middleware/` | `auth.js`, `errorHandler.js`. |
+| `src/lib/pagination.js` | Shared limit/positive-int parsing and keyset cursor codec (events, transactions). |
 | `src/lib/money.js` | Decimal ↔ cents conversion. |
 | `src/constants/hooks.js` | Lifecycle hook type constants. |
 | `src/utils/{modelGenerator,restGenerator}/` | Generic CRUD model + routes/handlers. |

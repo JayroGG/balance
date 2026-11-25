@@ -268,7 +268,8 @@ balance/
 │   │   ├── auth.js         # POC: inject req.userId = 1 (swap for real auth)
 │   │   └── errorHandler.js # central error → JSON + status
 │   ├── lib/
-│   │   └── money.js        # decimal ↔ cents
+│   │   ├── money.js        # decimal ↔ cents
+│   │   └── pagination.js   # limit/positive-int parsing + keyset cursor codec
 │   ├── utils/
 │   │   ├── modelGenerator/ # generic CRUD model (SQL + money conversion)
 │   │   └── restGenerator/  # generic CRUD routes + handlers/ (fire hooks)
@@ -313,4 +314,5 @@ balance/
 - **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; lend ≤ available; repay ≤ pending; a vault deletes only at balance 0, a loan only at pending 0. Loan journal rows are read-only via `/transactions`. See ADR-004/ADR-010.
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
 - **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard. See ADR-008.
+- **Transactions list:** `GET /transactions` is a custom search route (not the generic list): filters (`q`, `from`/`to`, `type`, `category_id`, `loans`, `sort`) + keyset paging on `(occurred_at, id)` return `{ items, next_cursor, totals }`; totals span the whole filtered set and skip journal rows. Index `idx_transactions_occurred(team_id, occurred_at, id)`. See ADR-011.
 - **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

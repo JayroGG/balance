@@ -41,6 +41,7 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
 | **Shopping lists** | Pre-expense checklists, kept **out of the ledger** until checkout books a single expense transaction for the whole list. Item prices are per-unit *estimates*; the checkout `amount` is authoritative. (ADR-008.) |
 | **Activity events** | Every successful mutation appends to an **append-only `events` ledger**; `GET /events` serves a polled, context-scoped feed. Remote push (Expo) is the recorded north star delivery channel. (ADR-009.) |
+| **Transactions search** | `GET /transactions` filters by text (`q`: description/category), date range, type, category and loan-journal visibility, with server-side totals and cursor pagination (`{ items, next_cursor, totals }`). (ADR-011.) |
 | **Loans** | Receivables (money lent out) mirroring the vault model: figures derive from an append-only `loan_history` ledger; lend/repay book **journal transactions** (`loan_id`, excluded from balance math, read-only); `available = total − locked − lent`. (ADR-010.) |
 
 ## 5. Data Model
@@ -159,7 +160,7 @@ display (amounts as **decimals**). Events are immutable: never updated, never so
 
 ```
 # Transactions (CRUD + soft delete)
-GET    /transactions            ?type= &category_id=
+GET    /transactions            ?q= &from= &to= &type= &category_id= &loans= &sort= &limit= &cursor=  → { items, next_cursor, totals }  (ADR-011)
 POST   /transactions            { type, amount, category_id?, description?, occurred_at? }
 GET    /transactions/:id
 PUT    /transactions/:id

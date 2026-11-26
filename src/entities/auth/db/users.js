@@ -14,4 +14,10 @@ const roleById = (id) => {
   return row ? row.role : 'user';
 };
 
-module.exports = { findByEmail, roleById };
+// Gate flags + global role for the refresh path (JWT claims are re-read, not trusted from the old token).
+const findById = (id) =>
+  db.prepare(
+    `SELECT id, email, role, active, verified FROM users WHERE id = ? AND deleted_at IS NULL`
+  ).get(id);
+
+module.exports = { findByEmail, findById, roleById };

@@ -299,7 +299,7 @@ balance/
 │   ├── constants/
 │   │   └── hooks.js        # lifecycle hook type constants
 │   ├── middleware/
-│   │   ├── auth.js         # POC: inject req.userId = 1 (swap for real auth)
+│   │   ├── auth.js         # JWT + session validation (ADR-001/003/015)
 │   │   └── errorHandler.js # central error → JSON + status
 │   ├── lib/
 │   │   ├── money.js        # decimal ↔ cents
@@ -350,6 +350,8 @@ balance/
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
 - **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for validation. See ADR-008.
 - **Tags:** `transaction_categories(transaction_id, category_id)` (PK both, index on `category_id`) replaces `transactions.category_id`; the model attaches `categories: [{ id, name }]` to every read and validates `category_ids` against the transaction's own context. See ADR-013.
+- **Auth tokens (ADR-015):** short access JWT + rotating opaque refresh token on the same `sessions` row (SHA-256 only, previous hash kept for reuse detection → session revoked). `/auth/refresh` is public like `/auth/login`.
+- **Vault order (ADR-016):** `vault_order(user_id, vault_id, position)` per user; `GET /vaults` sorts in JS (`vaults/db/order.js`), `/balance` in SQL via a `LEFT JOIN` on the caller's rows.
 - **Cards:** `transactions.card_id` + type `card_payment` (ADR-014). Every balance/totals query applies the same rule as loan journal rows: charges are out of net worth, payments are in; `GET /transactions` totals report `card_payments` apart from `income`/`expense`. Statement dates live in `src/lib/cardCycle.js`; figures in `cards/db/figures.js` (also used by `/balance`). `npm run migrate` rebuilds `transactions` (a CHECK can't be altered).
 - **Transactions list:** `GET /transactions` is a custom search route (not the generic list): filters (`q`, `from`/`to`, `type`, `category_id`, `loans`, `sort`) + keyset paging on `(occurred_at, id)` return `{ items, next_cursor, totals }`; totals span the whole filtered set and skip journal rows. Index `idx_transactions_occurred(team_id, occurred_at, id)`. See ADR-011.
 - **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

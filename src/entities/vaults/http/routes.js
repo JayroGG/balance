@@ -8,7 +8,8 @@ const ctrl = require('./controller');
 const router = Router();
 
 // Custom routes registered BEFORE restGenerator so /:id/history
-// and /:id/allocate are not swallowed by /:id.
+// /:id/allocate and PUT /order are not swallowed by /:id.
+router.put('/order',        ctrl.reorder);
 router.get('/:id/history',   ctrl.getHistory);
 router.post('/:id/allocate', ctrl.allocate);
 router.post('/:id/withdraw', ctrl.withdraw);

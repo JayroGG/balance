@@ -40,7 +40,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT    NOT NULL,
   revoked_at TEXT,
   ip         TEXT,
-  user_agent TEXT
+  user_agent TEXT,
+  refresh_hash       TEXT,
+  refresh_expires_at TEXT,
+  refresh_prev_hash  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
@@ -69,6 +72,14 @@ CREATE TABLE IF NOT EXISTS vaults (
 );
 CREATE INDEX IF NOT EXISTS idx_vaults_user ON vaults(user_id);
 CREATE INDEX IF NOT EXISTS idx_vaults_team ON vaults(team_id);
+
+-- Per-user vault order (ADR-016). A user's own positions over (possibly team-shared) vaults.
+CREATE TABLE IF NOT EXISTS vault_order (
+  user_id  INTEGER NOT NULL REFERENCES users(id),
+  vault_id INTEGER NOT NULL REFERENCES vaults(id),
+  position INTEGER NOT NULL,
+  PRIMARY KEY (user_id, vault_id)
+);
 
 -- Credit cards (ADR-014). No money state: owed/statement derive from transactions with card_id.
 CREATE TABLE IF NOT EXISTS cards (

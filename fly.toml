@@ -18,7 +18,8 @@ primary_region = "iad"
   # predates team_id; data is disposable, so we start clean rather than migrate.
   DB_PATH = "/data/balance.stage.v2.db"
   CURRENCY = "MXN"
-  JWT_EXPIRES_IN = "7d"
+  JWT_EXPIRES_IN = "1h"
+  REFRESH_EXPIRES_IN = "60d"
   AUTH_BYPASS = "false"
 
 [http_service]

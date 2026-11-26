@@ -84,13 +84,13 @@ describe('personal feed', () => {
     await me.put(`/shopping-list-items/${item.id}`, { checked: true });
     const before = (await me.get('/events')).body.length;
 
-    const res = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 999 });
+    const res = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 999, category_ids: [999999] });
     expect(res.status).toBe(400);
     expect((await me.get('/events')).body).toHaveLength(before);
   });
 
   it('rejected writes log nothing', async () => {
-    const res = await me.post('/transactions', { type: 'expense', amount: 50 }); // no income yet
+    const res = await me.post('/transactions', { type: 'transfer', amount: 50 }); // invalid type
     expect(res.status).toBe(400);
     expect((await me.get('/events')).body).toHaveLength(0);
   });

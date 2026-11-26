@@ -1,7 +1,8 @@
 'use strict';
 const db = require('../../../config/db');
-const { toDecimal } = require('../../../lib/money');
+const { toCents, toDecimal } = require('../../../lib/money');
 const { currency } = require('../../../config/env');
+const { figures } = require('../../cards/db/figures');
 
 // --- Context scoping (single source of truth, derived from the ledgers) ---
 // A scope is { userId, teamId }. teamId null -> personal (the user's own,
@@ -14,13 +15,15 @@ const where = ({ userId, teamId, targetUserId }) =>
     ? { sql: 'team_id = ?', value: teamId }
     : { sql: 'user_id = ? AND team_id IS NULL', value: targetUserId != null ? targetUserId : userId };
 
-// net worth = SUM(income) - SUM(expense), skipping loan journal rows (display-only)
+// net worth = SUM(income) - SUM(expense) - SUM(card payments). Skips loan journal rows (display-only)
+// and card charges (ADR-014: cash hasn't moved until the card is paid).
 const netWorthCents = (scope) => {
   const { sql, value } = where(scope);
   return db.prepare(`
     SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS net
     FROM transactions
     WHERE ${sql} AND deleted_at IS NULL AND loan_id IS NULL
+      AND (card_id IS NULL OR type = 'card_payment')
   `).get(value).net;
 };
 
@@ -64,7 +67,7 @@ const lentCents = (scope) => {
   `).get(value).lent;
 };
 
-// available = net worth - locked - lent (invariant: >= 0)
+// available = net worth - locked - lent. Signed: may be negative (ADR-012); only allocate/lend are capped by it.
 const availableCents = (scope) => netWorthCents(scope) - lockedCents(scope) - lentCents(scope);
 
 // --- API view ---
@@ -94,6 +97,10 @@ const get = (scope) => {
     GROUP BY l.id ORDER BY l.name
   `).all(value);
 
+  const cards = db.prepare(
+    `SELECT * FROM cards WHERE ${sql} AND deleted_at IS NULL ORDER BY name`
+  ).all(value).map((c) => ({ id: c.id, name: c.name, ...figures(c) }));
+
   return {
     total:     toDecimal(net),
     available: toDecimal(net - locked - lent),
@@ -109,6 +116,10 @@ const get = (scope) => {
       name:    l.name,
       amount:  toDecimal(l.amount),
       pending: toDecimal(l.pending),
+    })),
+    cards_owed: toDecimal(cards.reduce((sum, c) => sum + toCents(c.owed), 0)),
+    cards:     cards.map((c) => ({
+      id: c.id, name: c.name, owed: c.owed, statement_balance: c.statement_balance, due_date: c.due_date,
     })),
     currency,
   };

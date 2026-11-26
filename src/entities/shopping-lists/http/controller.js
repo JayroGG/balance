@@ -35,7 +35,7 @@ const checkout = (req, res, next) => {
       throw httpError('Checkout requires at least one checked item', 400);
     }
 
-    const { amount, category_id, occurred_at } = req.body;
+    const { amount, category_id, category_ids, occurred_at } = req.body;
     if (amount === undefined || amount === null || !(Number(amount) > 0)) {
       throw httpError('amount must be a positive number', 400);
     }
@@ -43,16 +43,19 @@ const checkout = (req, res, next) => {
     // Book into the LIST's own context, not the caller's active one, so a shared
     // list always posts against its own ledger.
     const txScope = { userId: list.user_id, teamId: list.team_id ?? null, isAdmin: req.context.isAdmin };
+    // Tags (ADR-013): explicit category_ids, else a single category_id override, else the list default.
+    const single = category_id ?? list.category_id;
+    const categoryIds = category_ids !== undefined ? category_ids : (single != null ? [single] : undefined);
     const txBody = {
       type:        'expense',
       amount,
       description: list.name,
-      category_id: category_id ?? list.category_id ?? undefined,
+      category_ids: categoryIds,
       occurred_at: occurred_at ?? undefined,
     };
 
-    // Reuse the transactions invariant (available >= 0). Throws 400 before any
-    // write, so a violating checkout books nothing.
+    // Reuse the transactions validation (type, category scope). Throws 400 before any
+    // write, so an invalid checkout books nothing. Available may go negative (ADR-012).
     transactionHooks({ type: BEFORE_CREATE, body: txBody, req: { context: txScope } });
 
     res.json(commit(txScope, txBody, req.context, list, req.userId));

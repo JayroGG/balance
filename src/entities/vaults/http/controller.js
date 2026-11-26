@@ -1,6 +1,7 @@
 'use strict';
 const { VaultModel } = require('../db/model');
 const history = require('../db/history');
+const { replaceOrder } = require('../db/order');
 const { toCents, toDecimal } = require('../../../lib/money');
 // Import balance queries directly to avoid circular index deps
 const { availableCents, vaultBalanceCents } = require('../../balance/db/queries');
@@ -27,6 +28,23 @@ const requireVault = (scope, vaultId) => {
   const vault = VaultModel.findById(scope, vaultId);
   if (!vault) { const e = new Error('Vault not found'); e.status = 404; throw e; }
   return vault;
+};
+
+// PUT /vaults/order { ids } — the caller's own display order (a personal preference, so every role
+// may set it, guests included). Every id must be a live vault visible in the request context.
+const reorder = (req, res, next) => {
+  try {
+    const { ids } = req.body;
+    const bad = (m) => { const e = new Error(m); e.status = 400; return e; };
+    if (!Array.isArray(ids) || !ids.every((id) => Number.isInteger(id) && id > 0)) {
+      throw bad('ids must be an array of positive integers');
+    }
+    if (new Set(ids).size !== ids.length) throw bad('ids must not repeat');
+    ids.forEach((id) => requireVault(req.context, id));
+    const visible = VaultModel.findAll(req.context).map((v) => v.id);
+    replaceOrder(req.userId, ids, visible);
+    res.status(204).send();
+  } catch (e) { next(e); }
 };
 
 const getHistory = (req, res, next) => {
@@ -77,4 +95,4 @@ const withdraw = (req, res, next) => {
   } catch (e) { next(e); }
 };
 
-module.exports = { getHistory, allocate, withdraw };
+module.exports = { getHistory, allocate, withdraw, reorder };

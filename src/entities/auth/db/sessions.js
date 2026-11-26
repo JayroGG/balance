@@ -19,4 +19,17 @@ const findById = (id) =>
 const revoke = (id) =>
   db.prepare(`UPDATE sessions SET revoked_at = ${NOW} WHERE id = ? AND revoked_at IS NULL`).run(id);
 
-module.exports = { create, setExpiry, findById, revoke };
+// Refresh token state (ADR-015): only SHA-256 hashes are stored. `refresh_prev_hash` keeps the
+// previously rotated hash so a replay of it is detectable.
+const setRefresh = (id, hash, refreshExpiresAtISO, prevHash = null) =>
+  db.prepare(
+    `UPDATE sessions SET refresh_hash = ?, refresh_expires_at = ?, expires_at = ?, refresh_prev_hash = ? WHERE id = ?`
+  ).run(hash, refreshExpiresAtISO, refreshExpiresAtISO, prevHash, id);
+
+const findByRefreshHash = (hash) =>
+  db.prepare(`SELECT * FROM sessions WHERE refresh_hash = ?`).get(hash);
+
+const findByPrevRefreshHash = (hash) =>
+  db.prepare(`SELECT * FROM sessions WHERE refresh_prev_hash = ?`).get(hash);
+
+module.exports = { create, setExpiry, findById, revoke, setRefresh, findByRefreshHash, findByPrevRefreshHash };

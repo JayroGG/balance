@@ -49,6 +49,13 @@ if (!txDdl.includes('card_payment')) {
     db.pragma('foreign_keys = ON');
   }
 }
+// ADR-015: sessions gain refresh-token columns (SHA-256 hashes only). Indexes after the columns exist.
+const sessionCols = db.prepare(`PRAGMA table_info(sessions)`).all().map((c) => c.name);
+for (const col of ['refresh_hash', 'refresh_expires_at', 'refresh_prev_hash']) {
+  if (!sessionCols.includes(col)) db.exec(`ALTER TABLE sessions ADD COLUMN ${col} TEXT`);
+}
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_refresh ON sessions(refresh_hash) WHERE refresh_hash IS NOT NULL`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_refresh_prev ON sessions(refresh_prev_hash) WHERE refresh_prev_hash IS NOT NULL`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_card ON transactions(card_id)`);
 
 console.log('Migration complete.');

@@ -52,6 +52,8 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **users** — `id, email, password_hash (nullable for now), …`
 - **categories** — `id, user_id, name, kind ('income'|'expense'|'both'), …`
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
+- **vault_order** — `user_id, vault_id, position` (PK `user_id, vault_id`) — each user's own display order over vaults, incl. team-shared ones (ADR-016).
+- **sessions** — carries the refresh token as SHA-256 hashes only (`refresh_hash`, `refresh_expires_at`, `refresh_prev_hash`; ADR-015).
 - **transactions** — `id, user_id, type ('income'|'expense'|'card_payment'), amount (cents, > 0), loan_id (FK, nullable), card_id (FK, nullable — expense+card = charge, card_payment+card = payment; ADR-014), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference. Rows with `loan_id` set are **loan journal entries**: display-only history, excluded from balance math, server-owned and read-only (ADR-010).
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
 - **loans** — `id, user_id, team_id (nullable), name, …` — a receivable (money lent to someone). **No money columns**: `amount` (Σ lend) and `pending` (Σ lend − Σ repay) derive from `loan_history`, like a vault balance.
@@ -188,6 +190,14 @@ POST   /loans/:id/repay          { amount }      (≤ pending; books a journal i
 GET/POST /cards ; GET/PUT/DELETE /cards/:id     (POST/PUT: { name, cut_day, due_day, credit_limit? }; DELETE requires owed = 0)
                                 reads: + owed, statement_balance, current_period, last_cut, due_date
 POST   /cards/:id/pay           { amount, occurred_at? }   (≤ owed; books a card_payment)
+
+# Auth                                                         (ADR-015)
+POST   /auth/login              { email, password }  -> { token, refreshToken }
+POST   /auth/refresh            { refreshToken }     -> { token, refreshToken }   (rotates; 401 if invalid/expired/revoked/reused)
+POST   /auth/logout             (revokes the session, refresh token included)
+
+# Vault order (per user)                                       (ADR-016)
+PUT    /vaults/order            { ids: [...] }  -> 204   (GET /vaults and /balance vaults follow it)
 
 # Balance (aggregate business logic)
 GET    /balance                 { total, available, lent, vaults:[{id,name,balance,target?}],

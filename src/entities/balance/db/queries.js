@@ -83,9 +83,10 @@ const get = (scope) => {
            COALESCE(SUM(CASE WHEN vh.action = 'allocate' THEN vh.amount ELSE -vh.amount END), 0) AS balance
     FROM vaults v
     LEFT JOIN vault_history vh ON vh.vault_id = v.id
+    LEFT JOIN vault_order vo ON vo.vault_id = v.id AND vo.user_id = ?
     WHERE v.${sql} AND v.deleted_at IS NULL
-    GROUP BY v.id ORDER BY v.name
-  `).all(value);
+    GROUP BY v.id ORDER BY vo.position IS NULL, vo.position, v.created_at, v.id
+  `).all(scope.userId, value);
 
   const loans = db.prepare(`
     SELECT l.id, l.name,

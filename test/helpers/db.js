@@ -9,7 +9,7 @@ const db = require('../../src/config/db');
 db.exec(fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'db', 'schema.sql'), 'utf8'));
 
 // Child → parent order (foreign_keys is ON).
-const TABLES = ['events', 'shopping_list_items', 'shopping_lists', 'vault_history', 'loan_history',
+const TABLES = ['events', 'vault_order', 'shopping_list_items', 'shopping_lists', 'vault_history', 'loan_history',
   'transaction_categories', 'transactions', 'cards', 'vaults', 'loans', 'categories', 'team_members', 'teams', 'sessions', 'users'];
 
 const wipeAll = () => TABLES.forEach((t) => db.prepare(`DELETE FROM ${t}`).run());

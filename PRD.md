@@ -42,6 +42,7 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Shopping lists** | Pre-expense checklists, kept **out of the ledger** until checkout books a single expense transaction for the whole list. Item prices are per-unit *estimates*; the checkout `amount` is authoritative. (ADR-008.) |
 | **Activity events** | Every successful mutation appends to an **append-only `events` ledger**; `GET /events` serves a polled, context-scoped feed. Remote push (Expo) is the recorded north star delivery channel. (ADR-009.) |
 | **Transactions search** | `GET /transactions` filters by text (`q`: description/category), date range, type, category and loan-journal visibility, with server-side totals and cursor pagination (`{ items, next_cursor, totals }`). (ADR-011.) |
+| **Credit cards** | Cards (cut day, due day, optional limit) with charges that are tracked but leave cash untouched until paid from the balance. Statement balance, due date and open-period spend are derived on read; `/balance` adds `cards_owed` + per-card summary. (ADR-014.) |
 | **Loans** | Receivables (money lent out) mirroring the vault model: figures derive from an append-only `loan_history` ledger; lend/repay book **journal transactions** (`loan_id`, excluded from balance math, read-only); `available = total − locked − lent`. (ADR-010.) |
 
 ## 5. Data Model
@@ -51,10 +52,11 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **users** — `id, email, password_hash (nullable for now), …`
 - **categories** — `id, user_id, name, kind ('income'|'expense'|'both'), …`
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
-- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), loan_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference. Rows with `loan_id` set are **loan journal entries**: display-only history, excluded from balance math, server-owned and read-only (ADR-010).
+- **transactions** — `id, user_id, type ('income'|'expense'|'card_payment'), amount (cents, > 0), loan_id (FK, nullable), card_id (FK, nullable — expense+card = charge, card_payment+card = payment; ADR-014), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference. Rows with `loan_id` set are **loan journal entries**: display-only history, excluded from balance math, server-owned and read-only (ADR-010).
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
 - **loans** — `id, user_id, team_id (nullable), name, …` — a receivable (money lent to someone). **No money columns**: `amount` (Σ lend) and `pending` (Σ lend − Σ repay) derive from `loan_history`, like a vault balance.
 - **loan_history** — `id, user_id, loan_id, action ('lend'|'repay'), amount (cents, > 0), created_at` — **append-only ledger of loan movements; the source of truth for loan figures**.
+- **cards** — `id, user_id, team_id (nullable), name, cut_day, due_day (1..31), credit_limit (cents, nullable), …` — a credit card (ADR-014). **No money columns**: owed/statement derive from `transactions` rows with its `card_id`.
 - **transaction_categories** — `transaction_id, category_id` (PK both; index on `category_id`) — the tag join (ADR-013); replaces the old `transactions.category_id`.
 - **shopping_lists** — `id, user_id, team_id (nullable), name, status ('open'|'purchased'), category_id (FK, nullable), transaction_id (FK, nullable), …` — a pre-expense checklist. `status` and `transaction_id` are **server-owned** (set only by checkout).
 - **shopping_list_items** — `id, user_id, list_id (FK), name, qty (real, > 0), price (cents, nullable), checked, …` — checklist rows, scoped by their **parent list** rather than by user/team. `price` is a per-**unit** estimate.
@@ -75,11 +77,12 @@ Vaults are **logical allocations within a single balance**, not separate sub-acc
 
 **Balance figures** (computed live, all in integer cents, always filtering `deleted_at IS NULL`):
 
-- `total` (net worth) = `SUM(income) − SUM(expense)` — from `transactions` **where `loan_id IS NULL`** (journal rows are display-only); **unaffected** by allocate/withdraw and lend/repay.
+- `total` (net worth) = `SUM(income) − SUM(expense) − SUM(card_payment)` — from `transactions` **where `loan_id IS NULL`**, skipping card charges (cash hasn't moved; ADR-014); journal rows are display-only; **unaffected** by allocate/withdraw and lend/repay.
 - `vault[V] balance` = `SUM(allocate) − SUM(withdraw)` for V — from `vault_history`.
 - `locked` = `SUM(vault[V])` over active vaults.
 - `loan[L] pending` = `SUM(lend) − SUM(repay)` for L — from `loan_history`; `lent` = `SUM(loan[L])` over active loans.
 - `available` (spendable) = `total − locked − lent`.
+- Cards (ADR-014): `owed = Σcharges − Σpayments`; `last_cut` = latest clamped cut ≤ today; `due_date` = first clamped due day after it; `statement_balance = max(0, Σcharges ≤ last_cut − Σpayments)`; `current_period = Σcharges > last_cut`. A payment is `≤ owed`; no write may leave `owed < 0`; a card deletes only at `owed = 0`.
 
 **Allocate** `POST /vaults/:id/allocate { amount }`: move spendable money into a vault → vault balance ↑, available ↓; appends an `allocate` row. Bounded by `amount ≤ available`.
 
@@ -159,8 +162,8 @@ display (amounts as **decimals**). Events are immutable: never updated, never so
 
 ```
 # Transactions (CRUD + soft delete)
-GET    /transactions            ?q= &from= &to= &type= &category_id= &loans= &sort= &limit= &cursor=  → { items, next_cursor, totals }  (ADR-011)
-POST   /transactions            { type, amount, category_ids?: int[], description?, occurred_at? }  → row carries categories: [{ id, name }]  (ADR-013)
+GET    /transactions            ?q= &from= &to= &type= &category_id= &card_id= &loans= &sort= &limit= &cursor=  → { items, next_cursor, totals }  (ADR-011)
+POST   /transactions            { type, amount, category_ids?: int[], card_id?, description?, occurred_at? }  → row carries categories: [{ id, name }]  (ADR-013)
 GET    /transactions/:id
 PUT    /transactions/:id
 DELETE /transactions/:id        (soft delete)
@@ -181,9 +184,15 @@ GET    /loans/:id/history        (loan_history movement ledger)
 POST   /loans/:id/lend           { amount }      (≤ available; books a journal expense)
 POST   /loans/:id/repay          { amount }      (≤ pending; books a journal income)
 
+# Credit cards (CRUD + soft delete) + pay                     (ADR-014)
+GET/POST /cards ; GET/PUT/DELETE /cards/:id     (POST/PUT: { name, cut_day, due_day, credit_limit? }; DELETE requires owed = 0)
+                                reads: + owed, statement_balance, current_period, last_cut, due_date
+POST   /cards/:id/pay           { amount, occurred_at? }   (≤ owed; books a card_payment)
+
 # Balance (aggregate business logic)
 GET    /balance                 { total, available, lent, vaults:[{id,name,balance,target?}],
-                                  loans:[{id,name,amount,pending}], currency }
+                                  loans:[{id,name,amount,pending}], cards_owed,
+                                  cards:[{id,name,owed,statement_balance,due_date}], currency }
 
 # Shopping lists (CRUD + soft delete) + checkout            (ADR-008)
 GET    /shopping-lists          ?status=open|purchased

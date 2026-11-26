@@ -41,3 +41,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-011](ADR-011-transactions-search-pagination.md) | Transactions search, date range and keyset pagination | Accepted |
 | [ADR-012](ADR-012-allow-negative-available.md) | Allow negative available (supersedes ADR-004's `available ≥ 0` in part) | Accepted |
 | [ADR-013](ADR-013-multi-category-transactions.md) | Multiple categories per transaction (tags) | Accepted |
+| [ADR-014](ADR-014-credit-cards.md) | Credit cards: charges, statements and payments | Accepted |

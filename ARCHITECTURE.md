@@ -15,6 +15,8 @@ erDiagram
     users ||--o{ loans : owns
     loans ||--o{ loan_history : "pending ledger"
     loans |o--o{ transactions : "journal rows (loan_id)"
+    users ||--o{ cards : owns
+    cards |o--o{ transactions : "charges + payments (card_id)"
     users ||--o{ shopping_lists : owns
     shopping_lists ||--o{ shopping_list_items : contains
     shopping_lists |o--o| transactions : "booked at checkout"
@@ -50,11 +52,22 @@ erDiagram
     transactions {
         int id PK
         int user_id FK
-        string type "income|expense"
+        string type "income|expense|card_payment"
         int amount "cents, > 0"
         int loan_id FK "nullable: journal row, excluded from balance"
+        int card_id FK "nullable: expense+card_id = charge (not cash); card_payment+card_id = payment"
         string description
         date occurred_at
+        datetime deleted_at "nullable"
+    }
+    cards {
+        int id PK
+        int user_id FK
+        int team_id FK "nullable = personal"
+        string name
+        int cut_day "1..31, clamped to month length"
+        int due_day "1..31, clamped to month length"
+        int credit_limit "cents, nullable"
         datetime deleted_at "nullable"
     }
     vault_history {
@@ -124,13 +137,13 @@ erDiagram
 
 ```mermaid
 flowchart TD
-    A["GET /balance"] --> B["SUM(income) - SUM(expense)<br/>WHERE loan_id IS NULL<br/>= total (net worth)"]
+    A["GET /balance"] --> B["SUM(income) - SUM(expense) - SUM(card_payment)<br/>WHERE loan_id IS NULL, card charges skipped<br/>= total (net worth)"]
     A --> C["per vault: SUM(allocate) - SUM(withdraw)<br/>= vault balance (from vault_history)"]
     A --> L["per loan: SUM(lend) - SUM(repay)<br/>= pending (from loan_history)"]
     B --> D["available = total - SUM(vault balances) - SUM(loan pending)"]
     C --> D
     L --> D
-    D --> E["respond: { total, available, lent, vaults[], loans[], currency }"]
+    D --> E["respond: { total, available, lent, vaults[], loans[], cards_owed, cards[], currency }"]
 ```
 
 Allocate / withdraw move an **amount** between spendable and a vault (independent of any transaction):
@@ -146,6 +159,23 @@ stateDiagram-v2
         available can never go below 0
     end note
 ```
+
+## Credit cards (ADR-014)
+
+A card charge is an `expense` with `card_id`: a spend (expense totals, category filters) that
+does **not** move cash. Paying the card books a `card_payment` that does, and is not a spend.
+Nothing is stored on the card — `owed`, the statement and the open period derive from its rows:
+
+```mermaid
+flowchart LR
+    C["charge: expense + card_id<br/>(spend, cash unchanged)"] --> O["owed = Σcharges - Σpayments"]
+    P["POST /cards/:id/pay<br/>card_payment (cash leaves, not a spend)"] --> O
+    O --> S["statement_balance = max(0, Σcharges ≤ last_cut - Σpayments)<br/>due_date = first due day after last_cut"]
+    O --> R["current_period = Σcharges > last_cut"]
+```
+
+Cut/due days clamp to the month length (day 31 in February → 28/29); `last_cut` is the latest cut ≤ today (UTC).
+Writes may never leave `owed < 0`, and a card deletes only at `owed = 0`.
 
 ## Loans: lent money (ADR-010)
 
@@ -280,6 +310,7 @@ balance/
 │   ├── entities/
 │   │   ├── transactions/   # constants, db/{fields,model}, http/{hooks,routes}
 │   │   ├── vaults/         # + http/controller (allocate/withdraw/history), db/history
+│   │   ├── cards/          # credit cards: pay controller, db/figures (derived statement), ADR-014
 │   │   ├── loans/          # + http/controller (create semantics/lend/repay/history), db/history
 │   │   ├── categories/     # constants, db/{fields,model}, http/{hooks,routes}
 │   │   ├── balance/        # db/queries (aggregate), http/routes
@@ -319,5 +350,6 @@ balance/
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
 - **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for validation. See ADR-008.
 - **Tags:** `transaction_categories(transaction_id, category_id)` (PK both, index on `category_id`) replaces `transactions.category_id`; the model attaches `categories: [{ id, name }]` to every read and validates `category_ids` against the transaction's own context. See ADR-013.
+- **Cards:** `transactions.card_id` + type `card_payment` (ADR-014). Every balance/totals query applies the same rule as loan journal rows: charges are out of net worth, payments are in; `GET /transactions` totals report `card_payments` apart from `income`/`expense`. Statement dates live in `src/lib/cardCycle.js`; figures in `cards/db/figures.js` (also used by `/balance`). `npm run migrate` rebuilds `transactions` (a CHECK can't be altered).
 - **Transactions list:** `GET /transactions` is a custom search route (not the generic list): filters (`q`, `from`/`to`, `type`, `category_id`, `loans`, `sort`) + keyset paging on `(occurred_at, id)` return `{ items, next_cursor, totals }`; totals span the whole filtered set and skip journal rows. Index `idx_transactions_occurred(team_id, occurred_at, id)`. See ADR-011.
 - **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

@@ -93,15 +93,45 @@ const createJournal = ({ userId, teamId }, { type, amountCents, description, loa
   return lastInsertRowid;
 };
 
+// Card payment (ADR-014): type 'card_payment' + card_id, cents in, no hooks, no categories.
+// Reduces net worth (cash left the balance) but is not a spend. Written by POST /cards/:id/pay.
+const createCardPayment = ({ userId, teamId }, { amountCents, description, cardId, occurredAt }) => {
+  const { lastInsertRowid } = db.prepare(
+    `INSERT INTO transactions (user_id, team_id, type, amount, description, card_id, occurred_at)
+     VALUES (?, ?, 'card_payment', ?, ?, ?, COALESCE(?, strftime('%Y-%m-%d', 'now')))`
+  ).run(userId, teamId ?? null, amountCents, description, cardId, occurredAt ?? null);
+  return lastInsertRowid;
+};
+
+const cardIsLive = (cardId) =>
+  !!db.prepare(`SELECT 1 FROM cards WHERE id = ? AND deleted_at IS NULL`).get(cardId);
+
+// A card must be a live card of the transaction's own context (team rows team cards,
+// personal rows the owner's), else 400. scope: { userId, teamId }.
+const assertCardInScope = ({ userId, teamId }, cardId) => {
+  if (cardId === undefined || cardId === null) return;
+  if (!Number.isInteger(cardId) || cardId <= 0) {
+    const e = new Error('card_id must be a positive integer or null'); e.status = 400; throw e;
+  }
+  const owner = teamId != null ? 'team_id = ?' : 'team_id IS NULL AND user_id = ?';
+  const found = db.prepare(`SELECT 1 FROM cards WHERE id = ? AND deleted_at IS NULL AND ${owner}`)
+    .get(cardId, teamId != null ? teamId : userId);
+  if (!found) {
+    const e = new Error('card_id must reference a card in the same context as the transaction');
+    e.status = 400; throw e;
+  }
+};
+
 // Escape LIKE wildcards so user text is matched literally (ESCAPE '\').
 const likePattern = (q) => `%${q.replace(/[\\%_]/g, '\\$&')}%`;
 
 // Filtered, keyset-paged list + whole-set totals (ADR-011). params are already
-// validated by the route: { q, from, to, type, category_id, loans, sort, limit, cursor:[date,id] }.
+// validated by the route: { q, from, to, type, category_id, card_id, loans, sort, limit, cursor:[date,id] }.
 // category_id matches any of a transaction's tags (EXISTS), so each row is still counted once.
 // Totals ignore cursor/limit and exclude journal rows (loan_id IS NOT NULL), like balance math;
-// count includes them. Every value is bound — only fixed fragments are interpolated.
-const search = (scope, { q, from, to, type, category_id, loans, sort, limit, cursor }) => {
+// count includes them. expense includes card charges (a spend); card_payments is reported apart and is
+// in neither income nor expense (ADR-014), so net = income - expense is spend-based, not cash-based. Every value is bound — only fixed fragments are interpolated.
+const search = (scope, { q, from, to, type, category_id, card_id, loans, sort, limit, cursor }) => {
   const { sql: scopeSql, values } = base.scopeClause(scope, 't');
   const where = [scopeSql, 't.deleted_at IS NULL'];
   const params = [...values];
@@ -117,6 +147,7 @@ const search = (scope, { q, from, to, type, category_id, loans, sort, limit, cur
   if (to)          { where.push('t.occurred_at <= ?'); params.push(to); }
   if (type)        { where.push('t.type = ?'); params.push(type); }
   if (category_id) { where.push('EXISTS (SELECT 1 FROM transaction_categories tc WHERE tc.transaction_id = t.id AND tc.category_id = ?)'); params.push(category_id); }
+  if (card_id)     { where.push('t.card_id = ?'); params.push(card_id); }
   if (loans === 'only')    where.push('t.loan_id IS NOT NULL');
   if (loans === 'exclude') where.push('t.loan_id IS NULL');
   const FROM = 'FROM transactions t';
@@ -124,7 +155,8 @@ const search = (scope, { q, from, to, type, category_id, loans, sort, limit, cur
   const t = db.prepare(
     `SELECT COUNT(*) AS count,
             COALESCE(SUM(CASE WHEN t.loan_id IS NULL AND t.type = 'income'  THEN t.amount END), 0) AS income,
-            COALESCE(SUM(CASE WHEN t.loan_id IS NULL AND t.type = 'expense' THEN t.amount END), 0) AS expense
+            COALESCE(SUM(CASE WHEN t.loan_id IS NULL AND t.type = 'expense' THEN t.amount END), 0) AS expense,
+            COALESCE(SUM(CASE WHEN t.type = 'card_payment' THEN t.amount END), 0) AS card_payments
        ${FROM} WHERE ${where.join(' AND ')}`
   ).get(...params);
 
@@ -149,12 +181,13 @@ const search = (scope, { q, from, to, type, category_id, loans, sort, limit, cur
     totals: {
       income: toDecimal(t.income),
       expense: toDecimal(t.expense),
+      card_payments: toDecimal(t.card_payments),
       net: toDecimal(t.income - t.expense),
       count: t.count,
     },
   };
 };
 
-const TransactionModel = { ...base, findById, findAll, create, update, createJournal, search, assertCategoriesInScope };
+const TransactionModel = { ...base, findById, findAll, create, update, createJournal, createCardPayment, search, assertCategoriesInScope, assertCardInScope, cardIsLive };
 
 module.exports = { TransactionModel };

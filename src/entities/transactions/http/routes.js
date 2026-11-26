@@ -36,8 +36,9 @@ router.get('/', (req, res, next) => {
     res.json(TransactionModel.search(req.context, {
       q: rawQ?.trim() || undefined,
       from, to,
-      type: oneOf(req.query.type, 'type', ['income', 'expense']),
+      type: oneOf(req.query.type, 'type', ['income', 'expense', 'card_payment']),
       category_id: positiveInt(req.query.category_id, 'category_id'),
+      card_id: positiveInt(req.query.card_id, 'card_id'),
       loans: oneOf(req.query.loans, 'loans', ['only', 'exclude']),
       sort: oneOf(req.query.sort, 'sort', ['asc', 'desc']) ?? 'desc',
       limit: parseLimit(req.query.limit, { def: 30, max: 100 }),

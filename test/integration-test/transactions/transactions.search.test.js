@@ -37,7 +37,7 @@ describe('response shape and filters', () => {
     const res = await list();
     expect(res.items).toHaveLength(3);
     expect(res.next_cursor).toBeNull();
-    expect(res.totals).toEqual({ income: 1000, expense: 30.5, net: 969.5, count: 3 });
+    expect(res.totals).toEqual({ income: 1000, expense: 30.5, net: 969.5, card_payments: 0, count: 3 });
     expect(res.items.map((t) => t.occurred_at)).toEqual(['2026-02-01', '2026-01-15', '2026-01-10']);
   });
 
@@ -147,7 +147,7 @@ describe('totals and journal rows', () => {
     const loan = (await me.post('/loans', { name: 'Bob', amount: 30 })).body;
     expect(loan.id).toBeTruthy();
     const all = await list();
-    expect(all.totals).toEqual({ income: 100, expense: 0, net: 100, count: 2 });
+    expect(all.totals).toEqual({ income: 100, expense: 0, net: 100, card_payments: 0, count: 2 });
     expect((await list('?loans=only')).items).toHaveLength(1);
     expect((await list('?loans=exclude')).items).toHaveLength(1);
     expect((await list('?loans=only')).totals).toMatchObject({ expense: 0, count: 1 });

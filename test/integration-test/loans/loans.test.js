@@ -47,7 +47,7 @@ describe('creation semantics', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: INSUFFICIENT_LOAN });
     expect((await me.get('/loans')).body).toHaveLength(0);
-    expect((await me.get('/transactions')).body).toHaveLength(1); // only the income
+    expect((await me.get('/transactions')).body.items).toHaveLength(1); // only the income
   });
 
   it('books a pre-existing loan as a counted opening income plus its journal expense, bypassing the guard', async () => {
@@ -57,7 +57,7 @@ describe('creation semantics', () => {
     expect(res.body).toMatchObject({ name: 'Carla', amount: 150, pending: 150 });
     expect((await me.get('/balance')).body).toMatchObject({ total: 250, available: 100 });
 
-    const txns = (await me.get('/transactions')).body;
+    const txns = (await me.get('/transactions')).body.items;
     expect(txns).toHaveLength(3); // income + opening income + journal expense
     const opening = txns.find((t) => t.description === 'Loan opening: Carla');
     expect(opening).toMatchObject({ type: 'income', amount: 150, loan_id: null });
@@ -122,7 +122,7 @@ describe('journal read-only', () => {
     await me.post('/transactions', { type: 'income', amount: 500 });
     loanId = (await me.post('/loans', { name: 'Fran' })).body.id;
     await me.post(`/loans/${loanId}/lend`, { amount: 100 });
-    journalId = (await me.get('/transactions?type=expense')).body[0].id;
+    journalId = (await me.get('/transactions?type=expense')).body.items[0].id;
   });
 
   it('rejects editing a journal row', async () => {
@@ -146,7 +146,7 @@ describe('journal read-only', () => {
 describe('invariant interplay', () => {
   it('rejects deleting the pre-existing opening income while pending > 0', async () => {
     const loan = (await me.post('/loans', { name: 'Gia', amount: 200, pre_existing: true })).body;
-    const opening = (await me.get('/transactions?type=income')).body
+    const opening = (await me.get('/transactions?type=income')).body.items
       .find((t) => t.description === 'Loan opening: Gia');
     expect(opening).toBeDefined();
 
@@ -181,7 +181,7 @@ describe('delete rule', () => {
 
     expect((await me.del(`/loans/${loanId}`)).status).toBe(204);
     expect((await me.get(`/loans/${loanId}`)).status).toBe(404);
-    expect((await me.get('/transactions')).body).toHaveLength(3); // income + lend journal + repay journal
+    expect((await me.get('/transactions')).body.items).toHaveLength(3); // income + lend journal + repay journal
   });
 });
 

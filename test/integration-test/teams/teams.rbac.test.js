@@ -47,7 +47,7 @@ describe('gate 1 — capability', () => {
     for (const who of [owner, member, guest]) {
       const res = await who.get(inTeam('/transactions'));
       expect(res.status).toBe(200);
-      expect(res.body).toHaveLength(1);
+      expect(res.body.items).toHaveLength(1);
     }
   });
 
@@ -114,11 +114,11 @@ describe('personal context stays isolated', () => {
     await member.post('/transactions', { type: 'income', amount: 99 });
 
     const personal = await member.get('/transactions');
-    expect(personal.body).toHaveLength(1);
-    expect(personal.body[0].amount).toBe(99);
+    expect(personal.body.items).toHaveLength(1);
+    expect(personal.body.items[0].amount).toBe(99);
 
     const team = await member.get(inTeam('/transactions'));
-    expect(team.body).toHaveLength(1);
-    expect(team.body[0].amount).toBe(10);
+    expect(team.body.items).toHaveLength(1);
+    expect(team.body.items[0].amount).toBe(10);
   });
 });

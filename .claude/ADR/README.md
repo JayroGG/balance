@@ -38,3 +38,4 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-008](ADR-008-shopping-lists-checkout.md) | Shopping lists: a pre-expense checklist that books one expense at checkout | Accepted |
 | [ADR-009](ADR-009-activity-events-ledger.md) | Activity events ledger: a polled feed now, remote push as a delivery channel later | Accepted |
 | [ADR-010](ADR-010-loans-lent-money.md) | Loans as receivables: a second vault-shaped ledger with journal transactions | Accepted |
+| [ADR-011](ADR-011-transactions-search-pagination.md) | Transactions search, date range and keyset pagination | Accepted |

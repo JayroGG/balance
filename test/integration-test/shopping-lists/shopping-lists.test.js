@@ -49,7 +49,7 @@ describe('personal lifecycle', () => {
     expect(done.body.transaction_id).toEqual(expect.any(Number));
 
     // one expense titled with the list name landed in the ledger
-    const txns = (await me.get('/transactions?type=expense')).body;
+    const txns = (await me.get('/transactions?type=expense')).body.items;
     expect(txns).toHaveLength(1);
     expect(txns[0]).toMatchObject({ id: done.body.transaction_id, description: 'Supermarket', amount: 41.87 });
     expect((await me.get('/balance')).body).toMatchObject({ total: 958.13, available: 958.13 });
@@ -80,7 +80,7 @@ describe('checkout guards', () => {
     const res = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 10 });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/at least one checked item/);
-    expect((await me.get('/transactions?type=expense')).body).toHaveLength(0);
+    expect((await me.get('/transactions?type=expense')).body.items).toHaveLength(0);
   });
 
   it('rejects a second checkout', async () => {
@@ -91,7 +91,7 @@ describe('checkout guards', () => {
     const again = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 10 });
     expect(again.status).toBe(400);
     expect(again.body.error).toMatch(/already checked out/);
-    expect((await me.get('/transactions?type=expense')).body).toHaveLength(1); // no extra tx
+    expect((await me.get('/transactions?type=expense')).body.items).toHaveLength(1); // no extra tx
   });
 
   it('rejects checkout that would push available below zero — nothing is written', async () => {
@@ -103,7 +103,7 @@ describe('checkout guards', () => {
     const res = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 60 });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: INSUFFICIENT_TX });
-    expect((await me.get('/transactions?type=expense')).body).toHaveLength(0);
+    expect((await me.get('/transactions?type=expense')).body.items).toHaveLength(0);
     expect((await me.get(`/shopping-lists/${list.id}`)).body.status).toBe('open'); // not flipped
   });
 
@@ -192,7 +192,7 @@ describe('team context + RBAC', () => {
     const done = await owner.post(`/shopping-lists/${listId}/checkout?team_id=${teamId}`, { amount: 10 });
     expect(done.status).toBe(200);
     // the expense booked into the TEAM ledger
-    expect((await owner.get(`/transactions?type=expense&team_id=${teamId}`)).body).toHaveLength(1);
-    expect((await owner.get('/transactions?type=expense')).body).toHaveLength(0); // not personal
+    expect((await owner.get(`/transactions?type=expense&team_id=${teamId}`)).body.items).toHaveLength(1);
+    expect((await owner.get('/transactions?type=expense')).body.items).toHaveLength(0); // not personal
   });
 });

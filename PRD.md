@@ -35,9 +35,9 @@ This is a proof of concept (POC). Two things must be correct from day one: the *
 | **Environments** | Separated from day one via `dotenv` + `NODE_ENV` — `stage` and `prod`, each with its own DB file. |
 | **Auth** | Single seeded user (`user_id = 1`) now; schema + middleware designed for later DB-backed hashed auth. |
 | **Money** | Stored as **integer cents** in SQLite; API speaks **decimals** (e.g. `19.99`). Converted at the boundary. |
-| **Categories** | First-class resource with CRUD + soft delete; transactions reference a category. |
+| **Categories** | First-class resource with CRUD + soft delete; transactions carry **0..N categories as tags** (`category_ids`; the full amount counts under each; ADR-013). |
 | **Vaults** | Funded by **allocating an amount** of spendable money into a vault; **withdrawing** an amount returns it to spendable. Movements are recorded in the append-only `vault_history` ledger — its source of truth. No direct spending from a vault. (Corrected in ADR-004.) |
-| **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. Computed live; `available` is a hard `≥ 0` invariant. |
+| **Balance** | Endpoint exposes all three: `total` (net worth), `available` (spendable), per-vault balances. Computed live; `available` is signed and may go negative (ADR-012). |
 | **Soft deletion** | Everywhere, via a nullable `deleted_at` timestamp (`NULL` = active). |
 | **Shopping lists** | Pre-expense checklists, kept **out of the ledger** until checkout books a single expense transaction for the whole list. Item prices are per-unit *estimates*; the checkout `amount` is authoritative. (ADR-008.) |
 | **Activity events** | Every successful mutation appends to an **append-only `events` ledger**; `GET /events` serves a polled, context-scoped feed. Remote push (Expo) is the recorded north star delivery channel. (ADR-009.) |
@@ -51,17 +51,18 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **users** — `id, email, password_hash (nullable for now), …`
 - **categories** — `id, user_id, name, kind ('income'|'expense'|'both'), …`
 - **vaults** — `id, user_id, name, target_amount (cents, nullable), …`
-- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), category_id (FK, nullable), loan_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference. Rows with `loan_id` set are **loan journal entries**: display-only history, excluded from balance math, server-owned and read-only (ADR-010).
+- **transactions** — `id, user_id, type ('income'|'expense'), amount (cents, > 0), loan_id (FK, nullable), description, occurred_at, …` — a pure income/expense ledger; carries **no** vault reference. Rows with `loan_id` set are **loan journal entries**: display-only history, excluded from balance math, server-owned and read-only (ADR-010).
 - **vault_history** — `id, user_id, vault_id, action ('allocate'|'withdraw'), amount (cents, > 0), created_at` — **append-only ledger of vault movements; the source of truth for vault balances** (not just an audit trail).
 - **loans** — `id, user_id, team_id (nullable), name, …` — a receivable (money lent to someone). **No money columns**: `amount` (Σ lend) and `pending` (Σ lend − Σ repay) derive from `loan_history`, like a vault balance.
 - **loan_history** — `id, user_id, loan_id, action ('lend'|'repay'), amount (cents, > 0), created_at` — **append-only ledger of loan movements; the source of truth for loan figures**.
+- **transaction_categories** — `transaction_id, category_id` (PK both; index on `category_id`) — the tag join (ADR-013); replaces the old `transactions.category_id`.
 - **shopping_lists** — `id, user_id, team_id (nullable), name, status ('open'|'purchased'), category_id (FK, nullable), transaction_id (FK, nullable), …` — a pre-expense checklist. `status` and `transaction_id` are **server-owned** (set only by checkout).
 - **shopping_list_items** — `id, user_id, list_id (FK), name, qty (real, > 0), price (cents, nullable), checked, …` — checklist rows, scoped by their **parent list** rather than by user/team. `price` is a per-**unit** estimate.
 - **events** — `id, user_id (actor), team_id (nullable), entity, entity_id, action, summary (JSON, decimal amounts), created_at` — **append-only activity ledger** (immutable: no updates, no soft deletes); source of truth for the `/events` feed.
 
 **Invariants** (enforced in hooks/controller):
 - `amount` is always a positive integer; `type` carries the sign meaning.
-- `available ≥ 0` at all times — money in a vault is untouchable; any write that would push it negative is rejected `400` (see §6).
+- `available` may go negative (ADR-012, supersedes the old `≥ 0` rule of ADR-004): transaction writes and checkout are never rejected for balance. Only vault **allocate** and loan **lend** are capped by `available`; vault and loan balances stay non-negative (see §6).
 - A vault may only be deleted when its balance is `0` (withdraw it to zero first).
 - A loan may only be deleted when its `pending` is `0` (repay — or someday write off — first); its journal rows survive deletion.
 - A `purchased` shopping list is frozen history: no edits to it or its items, and no second checkout (`400`).
@@ -84,7 +85,7 @@ Vaults are **logical allocations within a single balance**, not separate sub-acc
 
 **Withdraw** `POST /vaults/:id/withdraw { amount }`: move money from a vault back to spendable → vault balance ↓, available ↑, net worth unchanged; appends a `withdraw` row. Bounded by `amount ≤ vault[V]`.
 
-**Hard invariant — `available ≥ 0`:** vaulted money is protected; to spend it you must withdraw it first. Enforced on every write that lowers `net_worth` or raises `locked` — create expense, increase expense, decrease income, delete income, and allocate all reject with `400` if they would breach it.
+**`available` is signed (ADR-012):** the owner may overspend and the ledger records it. Only allocate (`≤ available`) and lend (`≤ available`) are capped, so with `available ≤ 0` nothing can be locked or lent; withdraw stays `≤ vault balance`.
 
 Worked example:
 
@@ -113,9 +114,7 @@ converts to a claim and back. Lent wealth counts toward net worth but never towa
   initial lend atomically (≤ `available`); `{ name, amount, pre_existing: true }` → additionally
   posts a **counted** plain income (`"Loan opening: <name>"`, `loan_id NULL`) so a loan made before
   the app existed lands as `total +amount`, `available ±0` — all in one `db.transaction`.
-- **Invariants reused:** the `available ≥ 0` rule simply evaluates against the discounted
-  `available` everywhere it already fires — e.g. deleting an opening income while the money is
-  still lent is rejected `400`. A loan deletes only at `pending = 0`.
+- **Invariants:** `available` already discounts lent money; lend stays capped by it. Deleting an opening income while the money is still lent is now allowed (available goes negative, ADR-012). A loan deletes only at `pending = 0`.
 - **North star (deferred):** `POST /loans/:id/write-off` (counted expense for the remaining
   pending — wealth genuinely lost) and a `direction` column for borrowed money. See ADR-010.
 
@@ -126,8 +125,8 @@ A **shopping list** is a checklist you build *before* spending: name it, add ite
 Planned items are **not** money that moved — a list costs nothing and touches no balance figure until checkout. This keeps `transactions` a faithful record of real charges.
 
 - **Scoping.** A list is context-scoped like transactions (`?team_id=` → personal or team). Its **items are scoped by the list**, not by user/team, so on a shared team list everyone sees everyone's items. Item access is authorized by resolving the parent list in the caller's context first — an unreachable list yields `404` before any item row is touched.
-- **Checkout** (`POST /shopping-lists/:id/checkout { amount, category_id?, occurred_at? }`) requires at least one **checked** item and a positive `amount`. Item `price` is a per-unit **estimate**; the client sends the real total (the receipt is authoritative). Category resolves `body.category_id ?? list.category_id ?? none`. The expense is booked into the **list's own context**, not the caller's active one.
-- **The `available ≥ 0` invariant is reused, not reimplemented:** checkout runs the transactions `BEFORE_CREATE` hook before any write, so a checkout that would overdraw spendable money is rejected `400` and books nothing. The expense insert and the list freeze are one atomic DB transaction.
+- **Checkout** (`POST /shopping-lists/:id/checkout { amount, category_id?, occurred_at? }`) requires at least one **checked** item and a positive `amount`. Item `price` is a per-unit **estimate**; the client sends the real total (the receipt is authoritative). Categories resolve `body.category_ids`, else `[body.category_id ?? list.category_id]`, else none. The expense is booked into the **list's own context**, not the caller's active one.
+- **Validation is reused, not reimplemented:** checkout runs the transactions `BEFORE_CREATE` hook before any write, so an invalid body (bad type, category outside the list's context) is rejected `400` and books nothing. A checkout may overdraw `available` (ADR-012). The expense insert and the list freeze are one atomic DB transaction.
 - **Freezing & deletion.** A purchased list rejects renames, category edits, item writes, and a second checkout (`400`). Soft-deleting a list cascades a soft delete to its items and **leaves the linked transaction intact** — the money was really spent.
 - **RBAC** is inherited (ADR-005/006): guest read-only, member mutates only lists they created, owner/admin bypass.
 
@@ -161,7 +160,7 @@ display (amounts as **decimals**). Events are immutable: never updated, never so
 ```
 # Transactions (CRUD + soft delete)
 GET    /transactions            ?q= &from= &to= &type= &category_id= &loans= &sort= &limit= &cursor=  → { items, next_cursor, totals }  (ADR-011)
-POST   /transactions            { type, amount, category_id?, description?, occurred_at? }
+POST   /transactions            { type, amount, category_ids?: int[], description?, occurred_at? }  → row carries categories: [{ id, name }]  (ADR-013)
 GET    /transactions/:id
 PUT    /transactions/:id
 DELETE /transactions/:id        (soft delete)
@@ -190,7 +189,7 @@ GET    /balance                 { total, available, lent, vaults:[{id,name,balan
 GET    /shopping-lists          ?status=open|purchased
 POST   /shopping-lists          { name, category_id? }
 GET/PUT/DELETE /shopping-lists/:id     (PUT/DELETE blocked once purchased; DELETE cascades to items)
-POST   /shopping-lists/:id/checkout    { amount, category_id?, occurred_at? }
+POST   /shopping-lists/:id/checkout    { amount, category_ids?, category_id?, occurred_at? }
                                        (≥ 1 checked item; books one expense; freezes the list)
 
 # Shopping list items (CRUD + soft delete) — authorized through the parent list
@@ -239,7 +238,7 @@ Separately, `users.role` is `user` (default) or `admin`. A global **admin** is a
 that **overrides all of the above**: it bypasses team RBAC, team membership, and row ownership, can
 operate in any team (`?team_id=`) without joining, and can reach any user's personal data via an
 admin-only `?user_id=` selector (ignored for non-admins). The role rides in the JWT. **Integrity
-invariants are still enforced for admins** (`available ≥ 0`, vault-at-0 delete, team-delete-when-empty,
+invariants are still enforced for admins** (allocate/lend ≤ available, vault-at-0 delete, team-delete-when-empty,
 last-owner). Admins are created via `npm run create-user -- <email> <password> admin`.
 
 ## 8. Architecture (summary)

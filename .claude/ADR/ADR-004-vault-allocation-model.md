@@ -1,6 +1,6 @@
 # ADR-004 — Vaults decoupled from transactions; amount-based allocation over a derived-balance ledger
 
-- **Status:** Accepted
+- **Status:** Accepted — the `available ≥ 0` invariant is **superseded in part by [ADR-012](ADR-012-allow-negative-available.md)**: transaction writes and checkout may now push `available` negative; allocate/lend caps and non-negative vault/loan balances stand.
 - **Date:** 2026-06-27
 - **Deciders:** Jayro Gómez
 - **Supersedes / Related:** Corrects the vault/balance model in **PRD §5–§6**, `ARCHITECTURE.md`

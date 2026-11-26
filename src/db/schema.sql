@@ -76,7 +76,6 @@ CREATE TABLE IF NOT EXISTS transactions (
   team_id     INTEGER REFERENCES teams(id),
   type        TEXT    NOT NULL CHECK (type IN ('income', 'expense')),
   amount      INTEGER NOT NULL CHECK (amount > 0),
-  category_id INTEGER REFERENCES categories(id),
   loan_id     INTEGER REFERENCES loans(id),  -- journal flag (ADR-010): set by lend/repay, excluded from balance
   description TEXT,
   occurred_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
@@ -86,8 +85,15 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_transactions_user     ON transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_team     ON transactions(team_id);
-CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_occurred ON transactions(team_id, occurred_at, id);
+
+-- Categories are tags (ADR-013): 0..N per transaction, the full amount counts under each.
+CREATE TABLE IF NOT EXISTS transaction_categories (
+  transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+  category_id    INTEGER NOT NULL REFERENCES categories(id),
+  PRIMARY KEY (transaction_id, category_id)
+);
+CREATE INDEX IF NOT EXISTS idx_transaction_categories_category ON transaction_categories(category_id);
 
 -- Append-only ledger of vault movements; source of truth for vault balances.
 -- A vault's balance = SUM(allocate) - SUM(withdraw). Movements are not tied to a transaction.

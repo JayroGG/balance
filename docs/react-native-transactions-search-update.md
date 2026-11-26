@@ -15,7 +15,7 @@ All params optional, combined with AND.
 | `q` | Trimmed, case-insensitive (ASCII) substring on `description` OR category name. Empty = ignored. `%` `_` `\` are literal. |
 | `from`, `to` | `YYYY-MM-DD`, inclusive on `occurred_at`; either may be omitted. Invalid date or `from > to` → `400`. |
 | `type` | `income` \| `expense`; anything else → `400`. |
-| `category_id` | positive integer. |
+| `category_id` | positive integer; matches transactions tagged with that category (ADR-013). |
 | `loans` | `only` (loan journal rows) \| `exclude` \| omitted = all. |
 | `sort` | `desc` (default) \| `asc` on `(occurred_at, id)`. |
 | `limit` | default **30**, max **100**. |
@@ -28,7 +28,7 @@ Send the same filters on every page; only `cursor` changes.
 
 ```json
 {
-  "items": [ { "id": 1, "type": "expense", "amount": 12.5, "category_id": 3, "description": "Milk",
+  "items": [ { "id": 1, "type": "expense", "amount": 12.5, "categories": [{ "id": 3, "name": "Groceries" }], "description": "Milk",
                "occurred_at": "2026-01-15", "loan_id": null, "team_id": null, "...": "same row shape as before" } ],
   "next_cursor": "WyIyMDI2LTAxLTE1Iiw0Ml0" ,
   "totals": { "income": 1000, "expense": 30.5, "net": 969.5, "count": 3 }

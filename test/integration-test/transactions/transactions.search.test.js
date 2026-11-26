@@ -29,7 +29,7 @@ describe('response shape and filters', () => {
   beforeEach(async () => {
     const food = (await me.post('/categories', { name: 'Groceries', kind: 'expense' })).body;
     await add({ type: 'income', amount: 1000, description: 'Salary', occurred_at: '2026-01-10' });
-    await add({ type: 'expense', amount: 20.5, description: 'Milk', category_id: food.id, occurred_at: '2026-01-15' });
+    await add({ type: 'expense', amount: 20.5, description: 'Milk', category_ids: [food.id], occurred_at: '2026-01-15' });
     await add({ type: 'expense', amount: 10, description: 'Bus', occurred_at: '2026-02-01' });
   });
 
@@ -72,7 +72,7 @@ describe('response shape and filters', () => {
 
   it('type, category_id and combined filters AND together', async () => {
     expect((await list('?type=income')).items).toHaveLength(1);
-    const catId = (await list('?q=milk')).items[0].category_id;
+    const catId = (await list('?q=milk')).items[0].categories[0].id;
     expect((await list(`?category_id=${catId}`)).items).toHaveLength(1);
     const combo = await list('?type=expense&q=bus&from=2026-02-01&sort=asc');
     expect(combo.items.map((t) => t.description)).toEqual(['Bus']);
@@ -158,10 +158,10 @@ describe('scope and soft delete', () => {
   it('q does not match foreign or deleted category names', async () => {
     await add({ type: 'income', amount: 100 });
     const foreign = (await other.post('/categories', { name: 'Zebra', kind: 'expense' })).body;
-    await add({ type: 'expense', amount: 1, description: 'a', category_id: foreign.id });
+    await add({ type: 'expense', amount: 1, description: 'a', category_ids: [foreign.id] });
     expect((await list('?q=zebra')).totals.count).toBe(0);
     const mine = (await me.post('/categories', { name: 'Yak', kind: 'expense' })).body;
-    await add({ type: 'expense', amount: 1, description: 'b', category_id: mine.id });
+    await add({ type: 'expense', amount: 1, description: 'b', category_ids: [mine.id] });
     expect((await list('?q=yak')).totals.count).toBe(1);
     await me.del(`/categories/${mine.id}`);
     expect((await list('?q=yak')).totals.count).toBe(0);
@@ -189,7 +189,7 @@ describe('scope and soft delete', () => {
     const tid = `?team_id=${team.id}`;
     await me.post(`/transactions${tid}`, { type: 'income', amount: 50 });
     const cat = (await me.post(`/categories${tid}`, { name: 'Pizza', kind: 'expense' })).body;
-    await me.post(`/transactions${tid}`, { type: 'expense', amount: 5, category_id: cat.id });
+    await me.post(`/transactions${tid}`, { type: 'expense', amount: 5, category_ids: [cat.id] });
     expect((await list(`${tid}&q=pizza`)).totals.count).toBe(1);
   });
 

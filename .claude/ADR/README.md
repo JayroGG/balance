@@ -31,7 +31,7 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-001](ADR-001-auth-strategy.md) | Authentication as a modular layer (DB-hashed now, Auth0 north star) | Accepted |
 | [ADR-002](ADR-002-documentation-and-workflow-standard.md) | Documentation & agent-workflow standard | Accepted |
 | [ADR-003](ADR-003-session-validation.md) | Stateful session validation over JWT (DB-backed sessions) | Proposed (deferred) |
-| [ADR-004](ADR-004-vault-allocation-model.md) | Vaults decoupled from transactions; amount-based allocation over a derived-balance ledger | Accepted |
+| [ADR-004](ADR-004-vault-allocation-model.md) | Vaults decoupled from transactions; amount-based allocation over a derived-balance ledger | Accepted (`available ≥ 0` superseded in part by ADR-012) |
 | [ADR-005](ADR-005-team-rbac.md) | Team RBAC: owner/member/guest with a two-gate (method + ownership) model | Accepted |
 | [ADR-006](ADR-006-global-admin-role.md) | Global admin role (platform super-admin) overriding team RBAC | Accepted |
 | [ADR-007](ADR-007-testing-harness.md) | Jest + supertest harness over a throwaway SQLite file | Accepted |
@@ -39,3 +39,5 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-009](ADR-009-activity-events-ledger.md) | Activity events ledger: a polled feed now, remote push as a delivery channel later | Accepted |
 | [ADR-010](ADR-010-loans-lent-money.md) | Loans as receivables: a second vault-shaped ledger with journal transactions | Accepted |
 | [ADR-011](ADR-011-transactions-search-pagination.md) | Transactions search, date range and keyset pagination | Accepted |
+| [ADR-012](ADR-012-allow-negative-available.md) | Allow negative available (supersedes ADR-004's `available ≥ 0` in part) | Accepted |
+| [ADR-013](ADR-013-multi-category-transactions.md) | Multiple categories per transaction (tags) | Accepted |

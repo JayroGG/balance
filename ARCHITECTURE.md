@@ -9,7 +9,8 @@ erDiagram
     users ||--o{ categories : owns
     users ||--o{ vaults : owns
     users ||--o{ transactions : owns
-    categories ||--o{ transactions : classifies
+    categories ||--o{ transaction_categories : "tags"
+    transactions ||--o{ transaction_categories : "tagged with"
     vaults ||--o{ vault_history : "balance ledger"
     users ||--o{ loans : owns
     loans ||--o{ loan_history : "pending ledger"
@@ -42,12 +43,15 @@ erDiagram
         int target_amount "cents, nullable"
         datetime deleted_at "nullable"
     }
+    transaction_categories {
+        int transaction_id FK
+        int category_id FK "PK(transaction_id, category_id)"
+    }
     transactions {
         int id PK
         int user_id FK
         string type "income|expense"
         int amount "cents, > 0"
-        int category_id FK "nullable"
         int loan_id FK "nullable: journal row, excluded from balance"
         string description
         date occurred_at
@@ -190,7 +194,7 @@ stateDiagram-v2
 ```
 
 Checkout is the only writer of `status`/`transaction_id`, and it reuses the transactions
-`BEFORE_CREATE` hook rather than reimplementing the `available ≥ 0` guard:
+`BEFORE_CREATE` hook (type + category-scope validation) rather than reimplementing it:
 
 ```mermaid
 flowchart TD
@@ -199,7 +203,7 @@ flowchart TD
     C --> D{"open? ≥1 checked item?<br/>amount > 0?"}
     D -- no --> X["400"]
     D -- yes --> E["txScope = list's OWN context<br/>(userId, teamId), not the caller's"]
-    E --> F["transactionHooks BEFORE_CREATE<br/>available ≥ 0 guard — before any write"]
+    E --> F["transactionHooks BEFORE_CREATE<br/>validation — before any write; no balance guard (ADR-012)"]
     F -- breach --> X
     F -- ok --> G["db.transaction: create expense<br/>+ markPurchased(transaction_id)"]
     G --> H["200 — purchased list"]
@@ -310,9 +314,10 @@ balance/
 - **Cross-entity access:** import the model file directly (e.g. `../../transactions/db/model`), never via the entity `index.js`, to avoid circular deps.
 - **Money:** stored as integer cents; the model layer (`modelGenerator` `moneyFields`) converts decimal↔cents at the read/write boundary.
 - **Auth-ready:** all tables carry `user_id`; only the auth middleware changes in Phase 2.
-- **Balances are derived** from the ledgers (`transactions` where `loan_id IS NULL`, `vault_history`, `loan_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by transaction hooks (the `available ≥ 0` guard) and the vaults/loans controllers.
-- **Invariants:** positive amounts; `available ≥ 0` on every spendable-affecting write; withdraw ≤ vault balance; lend ≤ available; repay ≤ pending; a vault deletes only at balance 0, a loan only at pending 0. Loan journal rows are read-only via `/transactions`. See ADR-004/ADR-010.
+- **Balances are derived** from the ledgers (`transactions` where `loan_id IS NULL`, `vault_history`, `loan_history`) — never stored. Cent-level helpers live in `balance/db/queries.js` and are reused by the vaults/loans controllers (allocate/lend caps).
+- **Invariants:** positive amounts; `available` may go negative (ADR-012) but allocate/lend are capped by it; withdraw ≤ vault balance; lend ≤ available; repay ≤ pending; a vault deletes only at balance 0, a loan only at pending 0. Loan journal rows are read-only via `/transactions`. See ADR-004/ADR-010.
 - **RBAC:** team roles `owner|member|guest` resolved onto `req.context.role` by `resolveContext`; two gates (capability + ownership) in `src/lib/access.js`; team management is owner-only by role; a team deletes only when empty (no active transactions/vaults). See ADR-005.
-- **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for the `available ≥ 0` guard. See ADR-008.
+- **Child collections scope by parent:** `shopping_list_items` is keyed by `list_id` (not user/team) and authorized by resolving the parent list in `req.context` — so it bypasses `modelGenerator` for a hand-written model. Shopping lists stay out of the ledger until checkout books one expense, reusing the transactions `BEFORE_CREATE` hook for validation. See ADR-008.
+- **Tags:** `transaction_categories(transaction_id, category_id)` (PK both, index on `category_id`) replaces `transactions.category_id`; the model attaches `categories: [{ id, name }]` to every read and validates `category_ids` against the transaction's own context. See ADR-013.
 - **Transactions list:** `GET /transactions` is a custom search route (not the generic list): filters (`q`, `from`/`to`, `type`, `category_id`, `loans`, `sort`) + keyset paging on `(occurred_at, id)` return `{ items, next_cursor, totals }`; totals span the whole filtered set and skip journal rows. Index `idx_transactions_occurred(team_id, occurred_at, id)`. See ADR-011.
 - **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

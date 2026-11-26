@@ -64,7 +64,7 @@ const lentCents = (scope) => {
   `).get(value).lent;
 };
 
-// available = net worth - locked - lent (invariant: >= 0)
+// available = net worth - locked - lent. Signed: may be negative (ADR-012); only allocate/lend are capped by it.
 const availableCents = (scope) => netWorthCents(scope) - lockedCents(scope) - lentCents(scope);
 
 // --- API view ---

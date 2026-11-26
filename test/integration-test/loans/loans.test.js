@@ -143,25 +143,25 @@ describe('journal read-only', () => {
   });
 });
 
-describe('invariant interplay', () => {
-  it('rejects deleting the pre-existing opening income while pending > 0', async () => {
+describe('negative available interplay (ADR-012)', () => {
+  it('allows deleting the pre-existing opening income while pending > 0 — available goes negative', async () => {
     const loan = (await me.post('/loans', { name: 'Gia', amount: 200, pre_existing: true })).body;
     const opening = (await me.get('/transactions?type=income')).body.items
       .find((t) => t.description === 'Loan opening: Gia');
     expect(opening).toBeDefined();
 
-    const res = await me.del(`/transactions/${opening.id}`);
-    expect(res.status).toBe(400);
-
-    // still readable — nothing was deleted
-    expect((await me.get(`/loans/${loan.id}`)).status).toBe(200);
+    expect((await me.del(`/transactions/${opening.id}`)).status).toBe(204);
+    const bal = (await me.get('/balance')).body;
+    expect(bal).toMatchObject({ total: 0, lent: 200, available: -200 });
+    expect(bal.loans).toEqual([{ id: loan.id, name: 'Gia', amount: 200, pending: 200 }]); // receivable untouched
   });
 
-  it('rejects an expense that would overdraw available because money is lent', async () => {
+  it('allows an expense when money is lent; lending more stays capped', async () => {
     await me.post('/transactions', { type: 'income', amount: 300 });
-    await me.post('/loans', { name: 'Hana', amount: 300 }); // available = 0
-    const res = await me.post('/transactions', { type: 'expense', amount: 1 });
-    expect(res.status).toBe(400);
+    const loan = (await me.post('/loans', { name: 'Hana', amount: 300 })).body; // available = 0
+    expect((await me.post('/transactions', { type: 'expense', amount: 1 })).status).toBe(201);
+    expect((await me.get('/balance')).body.available).toBe(-1);
+    expect((await me.post(`/loans/${loan.id}/lend`, { amount: 1 })).status).toBe(400);
   });
 });
 

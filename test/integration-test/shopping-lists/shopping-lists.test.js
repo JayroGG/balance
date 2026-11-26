@@ -13,7 +13,6 @@ const { login, api } = require('../../helpers/api');
 const activeItemCount = (listId) =>
   db.prepare('SELECT COUNT(*) AS n FROM shopping_list_items WHERE list_id = ? AND deleted_at IS NULL').get(listId).n;
 
-const INSUFFICIENT_TX = 'Insufficient available balance: the amount exceeds spendable money (funds are allocated to vaults)';
 
 let me;
 
@@ -64,7 +63,7 @@ describe('personal lifecycle', () => {
 
     const done = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 10 });
     const tx = (await me.get(`/transactions/${done.body.transaction_id}`)).body;
-    expect(tx.category_id).toBe(cat.id);
+    expect(tx.categories).toEqual([{ id: cat.id, name: 'Groceries' }]);
   });
 });
 
@@ -94,17 +93,28 @@ describe('checkout guards', () => {
     expect((await me.get('/transactions?type=expense')).body.items).toHaveLength(1); // no extra tx
   });
 
-  it('rejects checkout that would push available below zero — nothing is written', async () => {
+  it('checkout may push available below zero (ADR-012)', async () => {
     const vault = (await me.post('/vaults', { name: 'Savings' })).body;
     await me.post(`/vaults/${vault.id}/allocate`, { amount: 950 }); // available = 50
     const item = (await me.post('/shopping-list-items', { list_id: list.id, name: 'Milk' })).body;
     await me.put(`/shopping-list-items/${item.id}`, { checked: true });
 
     const res = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 60 });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('purchased');
+    expect((await me.get('/balance')).body).toMatchObject({ total: 940, available: -10 });
+  });
+
+  it('rejects a checkout category from another context — nothing is written', async () => {
+    const foreign = (await me.post('/teams', { name: 'T' })).body;
+    const cat = (await me.post(`/categories?team_id=${foreign.id}`, { name: 'Team cat', kind: 'expense' })).body;
+    const item = (await me.post('/shopping-list-items', { list_id: list.id, name: 'Milk' })).body;
+    await me.put(`/shopping-list-items/${item.id}`, { checked: true });
+
+    const res = await me.post(`/shopping-lists/${list.id}/checkout`, { amount: 10, category_ids: [cat.id] });
     expect(res.status).toBe(400);
-    expect(res.body).toEqual({ error: INSUFFICIENT_TX });
     expect((await me.get('/transactions?type=expense')).body.items).toHaveLength(0);
-    expect((await me.get(`/shopping-lists/${list.id}`)).body.status).toBe('open'); // not flipped
+    expect((await me.get(`/shopping-lists/${list.id}`)).body.status).toBe('open');
   });
 
   it('rejects a non-positive amount', async () => {

@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT    NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   active        INTEGER NOT NULL DEFAULT 1,
   verified      INTEGER NOT NULL DEFAULT 0,
+  color         TEXT,
   created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   updated_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
   deleted_at    TEXT

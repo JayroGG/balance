@@ -19,6 +19,10 @@ if (!db.prepare(`PRAGMA table_info(teams)`).all().some((c) => c.name === 'color'
   db.exec(`ALTER TABLE teams ADD COLUMN color TEXT`);
 }
 
+if (!db.prepare(`PRAGMA table_info(users)`).all().some((c) => c.name === 'color')) {
+  db.exec(`ALTER TABLE users ADD COLUMN color TEXT`);
+}
+
 // Idempotent seed
 db.prepare(`INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`).run();
 

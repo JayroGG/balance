@@ -16,6 +16,7 @@ const {
   ShoppingListItemsEntity,
   EventsEntity,
   TransfersEntity,
+  UsersEntity,
 } = require('./entities');
 
 const app = express();
@@ -42,6 +43,7 @@ app.use('/auth', AuthEntity.protectedRoutes);
 // Teams are managed via team_members, not context, so they opt out.
 const routes = [
   { path: '/teams',        route: TeamsEntity.routes },
+  { path: '/users',        route: UsersEntity.routes },
   { path: '/categories',   route: CategoriesEntity.routes,   context: true },
   { path: '/vaults',       route: VaultsEntity.routes,       context: true },
   { path: '/loans',        route: LoansEntity.routes,        context: true },

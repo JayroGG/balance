@@ -13,12 +13,14 @@ const insert = ({ userId, fromTeamId, toTeamId, amountCents, description, occurr
 
 const raw = (id) => db.prepare(`SELECT * FROM transfers WHERE id = ?`).get(id);
 
-// "<email local part> (personal)" for the actor's personal side, the team name otherwise.
-const label = (teamId, actorId) => {
-  if (teamId != null) return db.prepare(`SELECT name FROM teams WHERE id = ?`).get(teamId)?.name ?? null;
+// Structural side: { kind: 'personal' | 'team', name } — name is the email local part (personal) or the team
+// name. The client renders the words (i18n); `label` below is the legacy baked string, kept for old builds.
+const side = (teamId, actorId) => {
+  if (teamId != null) return { kind: 'team', name: db.prepare(`SELECT name FROM teams WHERE id = ?`).get(teamId)?.name ?? null };
   const email = db.prepare(`SELECT email FROM users WHERE id = ?`).get(actorId)?.email ?? '';
-  return `${email.split('@')[0]} (personal)`;
+  return { kind: 'personal', name: email.split('@')[0] };
 };
+const labelOf = (s) => (s.kind === 'team' ? s.name : `${s.name} (personal)`);
 
 // Vault parts: withdraws that funded the transfer, or allocates written by a reversal.
 const vaultParts = (id) => db.prepare(
@@ -27,40 +29,48 @@ const vaultParts = (id) => db.prepare(
     WHERE vh.transfer_id = ? ORDER BY vh.id`
 ).all(id).map((p) => ({ ...p, amount: toDecimal(p.amount) }));
 
+const isSource = ({ teamId }, t) => (teamId != null ? t.from_team_id === teamId : t.from_team_id == null);
+
 // Vault parts belong to the SOURCE context: destination-side viewers must not see its vault names/amounts.
-const view = (t, withVaults = true) => ({
-  id: t.id,
-  user_id: t.user_id,
-  from_team_id: t.from_team_id,
-  to_team_id: t.to_team_id,
-  from_label: label(t.from_team_id, t.user_id),
-  to_label: label(t.to_team_id, t.user_id),
-  amount: toDecimal(t.amount),
-  description: t.description,
-  occurred_at: t.occurred_at,
-  created_at: t.created_at,
-  reversal_of: t.reversal_of,
-  reversed_by: db.prepare(`SELECT id FROM transfers WHERE reversal_of = ?`).get(t.id)?.id ?? null,
-  vaults: withVaults ? vaultParts(t.id) : [],
-});
+// scope = the viewing context (counterpart is the OTHER side); defaults to the source side.
+const view = (t, withVaults = true, scope = { teamId: t.from_team_id }) => {
+  const from = side(t.from_team_id, t.user_id);
+  const to = side(t.to_team_id, t.user_id);
+  const counterpart = isSource(scope, t) ? to : from;
+  return {
+    id: t.id,
+    user_id: t.user_id,
+    from_team_id: t.from_team_id,
+    to_team_id: t.to_team_id,
+    from_label: labelOf(from),
+    to_label: labelOf(to),
+    from_kind: from.kind, from_name: from.name, to_kind: to.kind, to_name: to.name,
+    counterpart_kind: counterpart.kind, counterpart_name: counterpart.name,
+    amount: toDecimal(t.amount),
+    description: t.description,
+    occurred_at: t.occurred_at,
+    created_at: t.created_at,
+    reversal_of: t.reversal_of,
+    reversed_by: db.prepare(`SELECT id FROM transfers WHERE reversal_of = ?`).get(t.id)?.id ?? null,
+    vaults: withVaults ? vaultParts(t.id) : [],
+  };
+};
 
 // Transfers touching the context: a team on either side, or (personal) the user's own with a NULL side.
 const touches = ({ userId, teamId, targetUserId }) => (teamId != null
   ? { sql: '(from_team_id = ? OR to_team_id = ?)', values: [teamId, teamId] }
   : { sql: '(user_id = ? AND (from_team_id IS NULL OR to_team_id IS NULL))', values: [targetUserId ?? userId] });
 
-const isSource = ({ teamId }, t) => (teamId != null ? t.from_team_id === teamId : t.from_team_id == null);
-
 const list = (scope) => {
   const { sql, values } = touches(scope);
   return db.prepare(`SELECT * FROM transfers WHERE ${sql} ORDER BY occurred_at DESC, id DESC`)
-    .all(...values).map((t) => view(t, isSource(scope, t)));
+    .all(...values).map((t) => view(t, isSource(scope, t), scope));
 };
 
 const findVisible = (scope, id) => {
   const { sql, values } = touches(scope);
   const row = db.prepare(`SELECT * FROM transfers WHERE id = ? AND ${sql}`).get(id, ...values);
-  return row ? view(row, isSource(scope, row)) : undefined;
+  return row ? view(row, isSource(scope, row), scope) : undefined;
 };
 
 const originalVaultWithdraws = (id) => db.prepare(
@@ -69,5 +79,5 @@ const originalVaultWithdraws = (id) => db.prepare(
     WHERE vh.transfer_id = ? AND vh.action = 'withdraw' ORDER BY vh.id`
 ).all(id);
 
-const TransferModel = { insert, raw, list, findVisible, label, view, originalVaultWithdraws };
+const TransferModel = { insert, raw, list, findVisible, view, originalVaultWithdraws };
 module.exports = { TransferModel };

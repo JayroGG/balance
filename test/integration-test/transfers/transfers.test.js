@@ -91,6 +91,23 @@ describe('A — transfer with a vault split', () => {
     expect((await txs('?type=transfer_in')).items).toHaveLength(0);
   });
 
+  it('exposes structural counterpart_kind/name next to the legacy label', async () => {
+    const { body } = await scenarioA();
+    expect(body).toMatchObject({ from_kind: 'personal', from_name: 'jaxjayro', to_kind: 'team', to_name: 'Casa',
+      counterpart_kind: 'team', counterpart_name: 'Casa' });
+    expect((await me.get(`/transfers/${body.id}`)).body).toMatchObject({ counterpart_kind: 'team', counterpart_name: 'Casa' });
+    expect((await me.get(`/transfers/${body.id}?team_id=${casa}`)).body)
+      .toMatchObject({ counterpart_kind: 'personal', counterpart_name: 'jaxjayro'});
+    expect((await me.get(`/transfers?team_id=${casa}`)).body[0]).toMatchObject({ counterpart_kind: 'personal', counterpart_name: 'jaxjayro' });
+    expect((await txs()).items.find((i) => i.type === 'transfer_out'))
+      .toMatchObject({ counterpart_label: 'Casa', counterpart_kind: 'team', counterpart_name: 'Casa' });
+    expect((await txs(`?team_id=${casa}`)).items.find((i) => i.type === 'transfer_in'))
+      .toMatchObject({ counterpart_label: 'jaxjayro (personal)', counterpart_kind: 'personal', counterpart_name: 'jaxjayro' });
+    const rev = await reverse(body.id);
+    expect(rev.body).toMatchObject({ counterpart_kind: 'personal', counterpart_name: 'jaxjayro' }); // reversal source = Casa
+    expect((await me.get(`/transfers/${rev.body.id}`)).body).toMatchObject({ counterpart_kind: 'team', counterpart_name: 'Casa' });
+  });
+
   it('logs sent/received events in each context and vault withdrawals', async () => {
     await scenarioA();
     const pe = await events();

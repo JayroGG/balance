@@ -15,12 +15,12 @@ const where = ({ userId, teamId, targetUserId }) =>
     ? { sql: 'team_id = ?', value: teamId }
     : { sql: 'user_id = ? AND team_id IS NULL', value: targetUserId != null ? targetUserId : userId };
 
-// net worth = SUM(income) - SUM(expense) - SUM(card payments). Skips loan journal rows (display-only)
+// net worth = SUM(income + transfers in) - SUM(expense + card payments + transfers out). Skips loan journal rows (display-only)
 // and card charges (ADR-014: cash hasn't moved until the card is paid).
 const netWorthCents = (scope) => {
   const { sql, value } = where(scope);
   return db.prepare(`
-    SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS net
+    SELECT COALESCE(SUM(CASE WHEN type IN ('income', 'transfer_in') THEN amount ELSE -amount END), 0) AS net
     FROM transactions
     WHERE ${sql} AND deleted_at IS NULL AND loan_id IS NULL
       AND (card_id IS NULL OR type = 'card_payment')

@@ -59,6 +59,8 @@ All monetary amounts are `INTEGER` (cents). All tables carry `created_at`, `upda
 - **loans** — `id, user_id, team_id (nullable), name, …` — a receivable (money lent to someone). **No money columns**: `amount` (Σ lend) and `pending` (Σ lend − Σ repay) derive from `loan_history`, like a vault balance.
 - **loan_history** — `id, user_id, loan_id, action ('lend'|'repay'), amount (cents, > 0), created_at` — **append-only ledger of loan movements; the source of truth for loan figures**.
 - **cards** — `id, user_id, team_id (nullable), name, cut_day, due_day (1..31), credit_limit (cents, nullable), …` — a credit card (ADR-014). **No money columns**: owed/statement derive from `transactions` rows with its `card_id`.
+- **transfers** — `id, user_id (actor), from_team_id, to_team_id (NULL = actor's personal), amount (cents, > 0), description, occurred_at, reversal_of (FK, UNIQUE, nullable), created_at` — **append-only** inter-context money movement (ADR-017). Each books a `transfer_out` and a `transfer_in` row in `transactions` (`transfer_id`) and may link `vault_history` rows (`transfer_id`). Types `transfer_out`/`transfer_in` move net worth/available but are not income/expense.
+- **step_up_permits** — `user_id, token hash, expires_at (5 min), used_at` — single-use re-authentication permits (ADR-018).
 - **transaction_categories** — `transaction_id, category_id` (PK both; index on `category_id`) — the tag join (ADR-013); replaces the old `transactions.category_id`.
 - **shopping_lists** — `id, user_id, team_id (nullable), name, status ('open'|'purchased'), category_id (FK, nullable), transaction_id (FK, nullable), …` — a pre-expense checklist. `status` and `transaction_id` are **server-owned** (set only by checkout).
 - **shopping_list_items** — `id, user_id, list_id (FK), name, qty (real, > 0), price (cents, nullable), checked, …` — checklist rows, scoped by their **parent list** rather than by user/team. `price` is a per-**unit** estimate.
@@ -198,6 +200,15 @@ POST   /auth/logout             (revokes the session, refresh token included)
 
 # Vault order (per user)                                       (ADR-016)
 PUT    /vaults/order            { ids: [...] }  -> 204   (GET /vaults and /balance vaults follow it)
+
+# Transfers (inter-context, append-only)                      (ADR-017)
+POST   /transfers               { to_team_id|null, amount, description?, occurred_at?, vaults?:[{vault_id,amount}] }
+                                (X-Step-Up; real owner of both contexts, no admin bypass; vaults must sum to amount − available)
+POST   /transfers/:id/reverse   (X-Step-Up; once; destination available ≥ amount)
+GET    /transfers ; GET /transfers/:id   (any role of either side; reversal_of / reversed_by, vault parts)
+
+# Step-up auth                                                  (ADR-018)
+POST   /auth/step-up            { password } -> { permit, expires_at }   (401 wrong password; 403 STEP_UP_REQUIRED on use)
 
 # Balance (aggregate business logic)
 GET    /balance                 { total, available, lent, vaults:[{id,name,balance,target?}],

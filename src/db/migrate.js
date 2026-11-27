@@ -26,11 +26,11 @@ if (db.prepare(`PRAGMA table_info(transactions)`).all().some((c) => c.name === '
   })();
 }
 
-// ADR-014: transactions gains card_id and the 'card_payment' type. SQLite can't alter a CHECK, so a
-// table created before this ADR is rebuilt from schema.sql's own DDL (copy, drop, rename) with
-// foreign keys off, as the SQLite docs prescribe; idempotent once the CHECK allows the new type.
+// ADR-014 + ADR-017: transactions gains card_id, transfer_id and the 'card_payment' / 'transfer_out' /
+// 'transfer_in' types. SQLite can't alter a CHECK, so a table created before these ADRs is rebuilt from schema.sql's own DDL (copy, drop, rename) with
+// foreign keys off, as the SQLite docs prescribe; idempotent once the CHECK allows the newest type.
 const txDdl = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'transactions'`).get().sql;
-if (!txDdl.includes('card_payment')) {
+if (!txDdl.includes('transfer_out')) {
   const target = /CREATE TABLE IF NOT EXISTS transactions \(([\s\S]*?)\n\);/.exec(sql)[0]
     .replace('CREATE TABLE IF NOT EXISTS transactions', 'CREATE TABLE transactions_new');
   const cols = db.prepare(`PRAGMA table_info(transactions)`).all().map((c) => c.name).join(', ');
@@ -57,5 +57,11 @@ for (const col of ['refresh_hash', 'refresh_expires_at', 'refresh_prev_hash']) {
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_refresh ON sessions(refresh_hash) WHERE refresh_hash IS NOT NULL`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_refresh_prev ON sessions(refresh_prev_hash) WHERE refresh_prev_hash IS NOT NULL`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_card ON transactions(card_id)`);
+// ADR-017: vault ledger rows can link to the transfer that caused them (transactions got transfer_id in the rebuild).
+if (!db.prepare(`PRAGMA table_info(vault_history)`).all().some((c) => c.name === 'transfer_id')) {
+  db.exec(`ALTER TABLE vault_history ADD COLUMN transfer_id INTEGER REFERENCES transfers(id)`);
+}
+db.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_transfer ON transactions(transfer_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_vault_history_transfer ON vault_history(transfer_id)`);
 
 console.log('Migration complete.');

@@ -44,3 +44,5 @@ Statuses: `Proposed` · `Accepted` · `Deprecated` · `Superseded by ADR-NNN`.
 | [ADR-014](ADR-014-credit-cards.md) | Credit cards: charges, statements and payments | Accepted |
 | [ADR-015](ADR-015-refresh-tokens.md) | Refresh tokens with rotation and reuse detection | Accepted |
 | [ADR-016](ADR-016-per-user-vault-order.md) | Per-user vault order | Accepted |
+| [ADR-017](ADR-017-inter-context-transfers.md) | Inter-context transfers: append-only `transfers` entity, owner-only, reversal instead of delete | Accepted |
+| [ADR-018](ADR-018-step-up-auth.md) | Step-up authentication (single-use permit) for sensitive actions | Accepted |

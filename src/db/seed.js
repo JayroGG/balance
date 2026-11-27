@@ -1,7 +1,7 @@
 'use strict';
 const bcrypt = require('bcryptjs');
 const db = require('../config/db');
-const { seedPassword } = require('../config/env');
+const { seedPassword, nodeEnv } = require('../config/env');
 
 db.prepare(
   `INSERT OR IGNORE INTO users (id, email) VALUES (1, 'user@balance.local')`
@@ -32,5 +32,18 @@ const insert = db.prepare(
 );
 
 defaultCategories.forEach((cat, i) => insert.run(i + 1, cat.name, cat.kind));
+
+// Permanent local demo login. Opt-in only (SEED_DEMO_USER=true in a local .env.<env>) and never on prod or
+// Fly (the Dockerfile runs this seed on every boot; Fly injects FLY_APP_NAME and its fly.toml never sets the flag).
+const demoAllowed = process.env.SEED_DEMO_USER === 'true' && nodeEnv !== 'prod' && !process.env.FLY_APP_NAME;
+if (demoAllowed) {
+  db.prepare(
+    `INSERT INTO users (email, password_hash, active, verified) VALUES ('demo@example.com', ?, 1, 1)
+     ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, active = 1, verified = 1, role = 'user', deleted_at = NULL`
+  ).run(bcrypt.hashSync(process.env.DEMO_PASSWORD || 'demo1234', 10));
+  console.log('Demo user ready: demo@example.com');
+} else if (process.env.SEED_DEMO_USER === 'true') {
+  console.warn('SEED_DEMO_USER ignored: refused on prod / Fly.');
+}
 
 console.log('Seed complete.');

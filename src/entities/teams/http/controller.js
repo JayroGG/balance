@@ -21,7 +21,7 @@ const requireRole = (req, teamId, role) => {
 // Teams I belong to (member or owner), not just the ones I created. Admin sees all teams.
 const listMine = (req, res, next) => {
   try {
-    res.json(req.isAdmin ? TeamModel.listAll() : TeamModel.listForMember(req.userId));
+    res.json(req.isAdmin ? TeamModel.listAll(req.userId) : TeamModel.listForMember(req.userId));
   } catch (e) { next(e); }
 };
 

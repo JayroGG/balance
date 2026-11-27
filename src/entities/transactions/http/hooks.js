@@ -11,6 +11,8 @@ const VALID_TYPES = ['income', 'expense'];
 
 const bad = (message) => Object.assign(new Error(message), { status: 400 });
 
+const TRANSFER_RO = 'Transfer transactions are read-only; use /transfers (POST /transfers/:id/reverse to undo)';
+
 const assertType = (type) => {
   if (type === 'card_payment') throw bad('Card payments are created with POST /cards/:id/pay');
   if (type !== undefined && !VALID_TYPES.includes(type)) {
@@ -78,6 +80,7 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
         const e = new Error('Loan journal transactions are read-only; use the loan lend/repay endpoints');
         e.status = 400; throw e;
       }
+      if (previous.transfer_id != null) throw bad(TRANSFER_RO);
       if (previous.type === 'card_payment') throw bad('Card payments are read-only; delete it and pay again');
       assertCardNotDeleted(previous);
       assertType(body.type);
@@ -108,6 +111,7 @@ const transactionHooks = ({ type, body, previous, record, req }) => {
         const e = new Error('Loan journal transactions are read-only; use the loan lend/repay endpoints');
         e.status = 400; throw e;
       }
+      if (record.transfer_id != null) throw bad(TRANSFER_RO);
       assertCardNotDeleted(record);
       // Deleting a payment only raises what's owed; deleting a charge must not push owed below zero.
       if (record.type === 'expense' && record.card_id != null) {

@@ -97,14 +97,44 @@ CREATE TABLE IF NOT EXISTS cards (
 CREATE INDEX IF NOT EXISTS idx_cards_user ON cards(user_id);
 CREATE INDEX IF NOT EXISTS idx_cards_team ON cards(team_id);
 
+-- Inter-context transfers (ADR-017). Append-only: never updated or deleted; a rollback is a NEW row
+-- with reversal_of set. NULL from/to team = the actor's personal context. user_id is the actor.
+CREATE TABLE IF NOT EXISTS transfers (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL REFERENCES users(id),
+  from_team_id INTEGER REFERENCES teams(id),
+  to_team_id   INTEGER REFERENCES teams(id),
+  amount       INTEGER NOT NULL CHECK (amount > 0),
+  description  TEXT,
+  occurred_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
+  created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  reversal_of  INTEGER UNIQUE REFERENCES transfers(id),
+  CHECK (from_team_id IS NOT to_team_id)
+);
+CREATE INDEX IF NOT EXISTS idx_transfers_from ON transfers(from_team_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_to   ON transfers(to_team_id);
+CREATE INDEX IF NOT EXISTS idx_transfers_user ON transfers(user_id);
+CREATE TRIGGER IF NOT EXISTS transfers_append_only BEFORE UPDATE ON transfers
+BEGIN SELECT RAISE(ABORT, 'transfers are append-only'); END;
+
+-- Step-up permits (ADR-018): short-lived, single-use, bound to a user; only the SHA-256 is stored.
+CREATE TABLE IF NOT EXISTS step_up_permits (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT    NOT NULL UNIQUE,
+  expires_at TEXT    NOT NULL,
+  used_at    TEXT
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     INTEGER NOT NULL REFERENCES users(id),
   team_id     INTEGER REFERENCES teams(id),
-  type        TEXT    NOT NULL CHECK (type IN ('income', 'expense', 'card_payment')),
+  type        TEXT    NOT NULL CHECK (type IN ('income', 'expense', 'card_payment', 'transfer_out', 'transfer_in')),
   amount      INTEGER NOT NULL CHECK (amount > 0),
   loan_id     INTEGER REFERENCES loans(id),  -- journal flag (ADR-010): set by lend/repay, excluded from balance
   card_id     INTEGER REFERENCES cards(id),  -- ADR-014: expense+card_id = card charge (not cash); card_payment+card_id = payment
+  transfer_id INTEGER REFERENCES transfers(id), -- ADR-017: set on transfer_out/transfer_in rows (read-only, not income/expense)
   description TEXT,
   occurred_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d', 'now')),
   created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
@@ -131,7 +161,8 @@ CREATE TABLE IF NOT EXISTS vault_history (
   vault_id   INTEGER NOT NULL REFERENCES vaults(id),
   action     TEXT    NOT NULL CHECK (action IN ('allocate', 'withdraw')),
   amount     INTEGER NOT NULL CHECK (amount > 0),
-  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+  created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  transfer_id INTEGER REFERENCES transfers(id)  -- ADR-017: withdraws that fund a transfer / allocates written by its reversal
 );
 CREATE INDEX IF NOT EXISTS idx_vault_history_vault ON vault_history(vault_id);
 

@@ -61,12 +61,36 @@ const setCategories = (transactionId, ids) => {
   for (const id of new Set(ids)) ins.run(transactionId, id);
 };
 
-const findById = (scope, id) => {
-  const row = base.findById(scope, id);
-  return row ? attachCategories([row])[0] : row;
+// Transfer rows (ADR-017) carry counterpart_label (the OTHER side: team name or "<email local> (personal)")
+// and reversal_of (set on a devolución row). Other rows are left untouched.
+const attachTransfer = (rows) => {
+  const ids = [...new Set(rows.filter((r) => r.transfer_id != null).map((r) => r.transfer_id))];
+  if (ids.length === 0) return rows;
+  const found = db.prepare(
+    `SELECT tr.id, tr.reversal_of, tr.user_id, tr.from_team_id, tr.to_team_id,
+            substr(u.email, 1, instr(u.email, '@') - 1) AS local,
+            (SELECT name FROM teams WHERE id = tr.from_team_id) AS from_name,
+            (SELECT name FROM teams WHERE id = tr.to_team_id)   AS to_name
+       FROM transfers tr JOIN users u ON u.id = tr.user_id
+      WHERE tr.id IN (${ids.map(() => '?').join(', ')})`
+  ).all(...ids);
+  const byId = new Map(found.map((f) => [f.id, f]));
+  return rows.map((r) => {
+    const f = r.transfer_id != null && byId.get(r.transfer_id);
+    if (!f) return r;
+    const side = r.type === 'transfer_out' ? [f.to_team_id, f.to_name] : [f.from_team_id, f.from_name];
+    return { ...r, reversal_of: f.reversal_of, counterpart_label: side[0] == null ? `${f.local} (personal)` : side[1] };
+  });
 };
 
-const findAll = (scope, filters) => attachCategories(base.findAll(scope, filters));
+const decorate = (rows) => attachTransfer(attachCategories(rows));
+
+const findById = (scope, id) => {
+  const row = base.findById(scope, id);
+  return row ? decorate([row])[0] : row;
+};
+
+const findAll = (scope, filters) => decorate(base.findAll(scope, filters));
 
 // category_ids is validated upstream (hooks / checkout); undefined leaves tags untouched.
 const create = db.transaction((scope, data) => {
@@ -120,6 +144,16 @@ const assertCardInScope = ({ userId, teamId }, cardId) => {
     const e = new Error('card_id must reference a card in the same context as the transaction');
     e.status = 400; throw e;
   }
+};
+
+// Transfer row (ADR-017): transfer_out / transfer_in + transfer_id, cents in, no hooks, no categories.
+// Moves net worth but is neither income nor expense. Written only by the /transfers controller.
+const createTransferRow = ({ userId, teamId }, { type, amountCents, description, transferId, occurredAt }) => {
+  const { lastInsertRowid } = db.prepare(
+    `INSERT INTO transactions (user_id, team_id, type, amount, description, transfer_id, occurred_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(userId, teamId ?? null, type, amountCents, description ?? null, transferId, occurredAt);
+  return lastInsertRowid;
 };
 
 // Escape LIKE wildcards so user text is matched literally (ESCAPE '\').
@@ -176,7 +210,7 @@ const search = (scope, { q, from, to, type, category_id, card_id, loans, sort, l
   const page = hasMore ? rows.slice(0, limit) : rows;
   const last = page[page.length - 1];
   return {
-    items: attachCategories(page).map((r) => ({ ...r, amount: toDecimal(r.amount) })),
+    items: decorate(page).map((r) => ({ ...r, amount: toDecimal(r.amount) })),
     next_cursor: hasMore ? encodeCursor([last.occurred_at, last.id]) : null,
     totals: {
       income: toDecimal(t.income),
@@ -188,6 +222,6 @@ const search = (scope, { q, from, to, type, category_id, card_id, loans, sort, l
   };
 };
 
-const TransactionModel = { ...base, findById, findAll, create, update, createJournal, createCardPayment, search, assertCategoriesInScope, assertCardInScope, cardIsLive };
+const TransactionModel = { ...base, findById, findAll, create, update, createJournal, createCardPayment, createTransferRow, search, assertCategoriesInScope, assertCardInScope, cardIsLive };
 
 module.exports = { TransactionModel };

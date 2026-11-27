@@ -1,6 +1,7 @@
 'use strict';
 // Centralized RBAC gates for team-scoped writes (ADR-005). Personal context has
 // role null and is already self-scoped, so both gates are no-ops there.
+const { roleOf } = require('../entities/teams/db/members');
 const httpError = (message, status) => Object.assign(new Error(message), { status });
 
 // Gate 1 — method capability: guests are read-only; owner/member (and personal) may write.
@@ -24,4 +25,11 @@ const assertCanMutate = (context, record) => {
   assertOwns(context, record);
 };
 
-module.exports = { assertCanWrite, assertOwns, assertCanMutate };
+// Inter-context transfers (ADR-017): REAL ownership only — reads team_members, never isAdmin.
+// teamId null = the caller's own personal context (always theirs).
+const assertRealOwner = (userId, teamId) => {
+  if (teamId == null) return;
+  if (roleOf(userId, teamId) !== 'owner') throw httpError('You must be an owner of both contexts', 403);
+};
+
+module.exports = { assertCanWrite, assertOwns, assertCanMutate, assertRealOwner };

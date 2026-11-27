@@ -2,10 +2,10 @@
 const db = require('../../../config/db');
 const { toDecimal } = require('../../../lib/money');
 
-const add = (userId, vaultId, action, amountCents) =>
+const add = (userId, vaultId, action, amountCents, transferId = null) =>
   db.prepare(
-    `INSERT INTO vault_history (user_id, vault_id, action, amount) VALUES (?, ?, ?, ?)`
-  ).run(userId, vaultId, action, amountCents);
+    `INSERT INTO vault_history (user_id, vault_id, action, amount, transfer_id) VALUES (?, ?, ?, ?, ?)`
+  ).run(userId, vaultId, action, amountCents, transferId);
 
 // Scoped by vault only — the vault is authorized via context upstream, and a
 // vault's full movement history (across all member actors) is the ledger.

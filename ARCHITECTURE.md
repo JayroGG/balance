@@ -177,6 +177,20 @@ flowchart LR
 Cut/due days clamp to the month length (day 31 in February → 28/29); `last_cut` is the latest cut ≤ today (UTC).
 Writes may never leave `owed < 0`, and a card deletes only at `owed = 0`.
 
+## Transfers (ADR-017, ADR-018)
+
+Moving money between two contexts the caller owns (personal ↔ team, team ↔ team). Source = active context.
+
+```mermaid
+flowchart LR
+    SU["POST /auth/step-up<br/>permit (5 min, single use)"] --> T["POST /transfers<br/>X-Step-Up + owner of both sides"]
+    T --> O["source: transfer_out row<br/>(+ vault withdraws if available < amount)"]
+    T --> I["destination: transfer_in row<br/>(lands in available)"]
+    T --> R["POST /transfers/:id/reverse<br/>new row, reversal_of = id"]
+```
+
+Append-only: a rollback is a new opposite transfer, never a delete. Blocked if the destination already spent the money.
+
 ## Loans: lent money (ADR-010)
 
 A loan is a receivable — the vault pattern pointed outward. Lend/repay move an **amount** between
@@ -353,5 +367,7 @@ balance/
 - **Auth tokens (ADR-015):** short access JWT + rotating opaque refresh token on the same `sessions` row (SHA-256 only, previous hash kept for reuse detection → session revoked). `/auth/refresh` is public like `/auth/login`.
 - **Vault order (ADR-016):** `vault_order(user_id, vault_id, position)` per user; `GET /vaults` sorts in JS (`vaults/db/order.js`), `/balance` in SQL via a `LEFT JOIN` on the caller's rows.
 - **Cards:** `transactions.card_id` + type `card_payment` (ADR-014). Every balance/totals query applies the same rule as loan journal rows: charges are out of net worth, payments are in; `GET /transactions` totals report `card_payments` apart from `income`/`expense`. Statement dates live in `src/lib/cardCycle.js`; figures in `cards/db/figures.js` (also used by `/balance`). `npm run migrate` rebuilds `transactions` (a CHECK can't be altered).
+- **Transfers (ADR-017):** append-only `transfers` table; each transfer books a `transfer_out` + `transfer_in` `transactions` row (linked by `transfer_id`) and optional `vault_history` withdraws (`transfer_id`) in one `db.transaction`. Net worth: `transfer_in` +, `transfer_out` −; excluded from income/expense totals. Owner of both sides required (`assertRealOwner`, no admin bypass). Reversal = new `transfers` row with `reversal_of`. `npm run migrate` rebuilds `transactions` again for the new types.
+- **Step-up (ADR-018):** `POST /auth/step-up` issues a hashed, 5-minute, single-use permit; `X-Step-Up` is required on `POST /transfers` and `POST /transfers/:id/reverse`.
 - **Transactions list:** `GET /transactions` is a custom search route (not the generic list): filters (`q`, `from`/`to`, `type`, `category_id`, `loans`, `sort`) + keyset paging on `(occurred_at, id)` return `{ items, next_cursor, totals }`; totals span the whole filtered set and skip journal rows. Index `idx_transactions_occurred(team_id, occurred_at, id)`. See ADR-011.
 - **Activity events:** every successful mutation appends to the `events` ledger — from the after-hooks (`CREATE`/`UPDATE`/`DESTROY`) for generated CRUD, from the owning controller for custom flows (allocate/withdraw, checkout inside its atomic commit, team management). Actor = `req.userId`; context = the **affected record's** `team_id`. `GET /events` is the read-only, context-scoped, newest-first feed. Remote push (Expo) is the recorded delivery north star. See ADR-009.

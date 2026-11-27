@@ -20,4 +20,9 @@ const findById = (id) =>
     `SELECT id, email, role, active, verified FROM users WHERE id = ? AND deleted_at IS NULL`
   ).get(id);
 
-module.exports = { findByEmail, findById, roleById };
+const passwordHashById = (id) => {
+  const row = db.prepare(`SELECT password_hash FROM users WHERE id = ? AND deleted_at IS NULL`).get(id);
+  return row ? row.password_hash : undefined;
+};
+
+module.exports = { findByEmail, findById, roleById, passwordHashById };

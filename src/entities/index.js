@@ -10,8 +10,9 @@ const { Entity: AuthEntity }         = require('./auth');
 const { Entity: ShoppingListsEntity }     = require('./shopping-lists');
 const { Entity: ShoppingListItemsEntity } = require('./shopping-list-items');
 const { Entity: EventsEntity }            = require('./events');
+const { Entity: TransfersEntity }         = require('./transfers');
 
 module.exports = {
   CategoriesEntity, VaultsEntity, LoansEntity, CardsEntity, TransactionsEntity, BalanceEntity, TeamsEntity, AuthEntity,
-  ShoppingListsEntity, ShoppingListItemsEntity, EventsEntity,
+  ShoppingListsEntity, ShoppingListItemsEntity, EventsEntity, TransfersEntity,
 };

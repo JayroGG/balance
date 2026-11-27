@@ -36,7 +36,7 @@ router.get('/', (req, res, next) => {
     res.json(TransactionModel.search(req.context, {
       q: rawQ?.trim() || undefined,
       from, to,
-      type: oneOf(req.query.type, 'type', ['income', 'expense', 'card_payment']),
+      type: oneOf(req.query.type, 'type', ['income', 'expense', 'card_payment', 'transfer_out', 'transfer_in']),
       category_id: positiveInt(req.query.category_id, 'category_id'),
       card_id: positiveInt(req.query.card_id, 'card_id'),
       loans: oneOf(req.query.loans, 'loans', ['only', 'exclude']),

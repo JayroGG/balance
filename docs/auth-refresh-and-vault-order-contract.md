@@ -19,3 +19,10 @@ For API clients (mobile app).
   The order is per user; any team role may set its own.
 - `GET /vaults` and the `/balance` `vaults` array return the caller's order: ordered vaults by position,
   then the rest by creation time.
+
+## Step-up and transfers (ADR-017, ADR-018)
+- `POST /auth/step-up { password }` → `200 { permit, expires_at }` (5 min, single use). Wrong password → `401`.
+- `POST /transfers` and `POST /transfers/:id/reverse` need header `X-Step-Up: <permit>`; missing/expired/used → `403 { code: 'STEP_UP_REQUIRED' }`.
+- `POST /transfers { to_team_id|null, amount, description?, occurred_at?, vaults?: [{ vault_id, amount }] }`; source is `?team_id=` (omitted = personal). Caller must be a real owner of both contexts (admins get no bypass → `403`). `vaults` is required only when `available < amount` and must sum to exactly `amount − available`.
+- `POST /transfers/:id/reverse` creates a new opposite transfer (`reversal_of`); once per transfer, `400` if the destination's `available < amount`.
+- `GET /transfers`, `GET /transfers/:id` — any role of either side. Transaction rows of type `transfer_out`/`transfer_in` carry `transfer_id` + `counterpart_label` and are read-only via `/transactions`.

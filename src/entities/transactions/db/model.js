@@ -79,7 +79,9 @@ const attachTransfer = (rows) => {
     const f = r.transfer_id != null && byId.get(r.transfer_id);
     if (!f) return r;
     const side = r.type === 'transfer_out' ? [f.to_team_id, f.to_name] : [f.from_team_id, f.from_name];
-    return { ...r, reversal_of: f.reversal_of, counterpart_label: side[0] == null ? `${f.local} (personal)` : side[1] };
+    const personal = side[0] == null;
+    return { ...r, reversal_of: f.reversal_of, counterpart_label: personal ? `${f.local} (personal)` : side[1],
+      counterpart_kind: personal ? 'personal' : 'team', counterpart_name: personal ? f.local : side[1] };
   });
 };
 

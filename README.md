@@ -22,7 +22,7 @@ Environments are separated from the start. `NODE_ENV` selects the config file (`
 ```bash
 # stage (default)
 NODE_ENV=stage npm run migrate   # create tables from schema.sql
-NODE_ENV=stage npm run seed      # seed user_id=1 + default categories
+NODE_ENV=stage npm run seed      # seed user_id=1 + default categories (+ demo@example.com / demo1234 when SEED_DEMO_USER=true; never prod/Fly)
 NODE_ENV=stage npm start         # start the API
 
 # prod

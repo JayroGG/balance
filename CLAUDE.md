@@ -21,7 +21,7 @@ A **single-user REST API** for personal financial records: incomings, expenses, 
 
 ```bash
 NODE_ENV=stage npm run migrate   # apply schema.sql
-NODE_ENV=stage npm run seed      # seed user_id=1 + default categories
+NODE_ENV=stage npm run seed      # seed user_id=1 + default categories (+ demo@example.com / demo1234 when SEED_DEMO_USER=true; never prod/Fly)
 NODE_ENV=stage npm start         # boot the API
 NODE_ENV=prod  npm start         # boot against the prod DB/config
 npm test                         # Jest suite (sets NODE_ENV=test itself)
